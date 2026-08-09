@@ -5813,68 +5813,129 @@ LPH_JIT_MAX(function() -- Main Cheat
             end)
         end
 
-        if wapus:GetValue("Backtracking", "Enabled") then
-            local delay = 1 / math.max(wapus:GetValue("Backtracking", "Refresh Rate"), 0.1)
+            -- ===================== BACKTRACK (VISUAL + AUTO HIT) =====================
+            if wapus:GetValue("Backtracking", "Enabled") then
+                local refresh = math.max(wapus:GetValue("Backtracking", "Refresh Rate"), 1)
+                local delay = 1 / refresh
+                local duration = wapus:GetValue("Backtracking", "Character Duration")
+                local transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01
+                local material = Enum.Material[wapus:GetValue("Backtracking", "Character Material")]
+                local color = wapus:GetValue("Backtracking", "Character Color")
 
-            if clockTime > backtrackTime + delay then
+                backtrackHistory = backtrackHistory or {}
+                backtrackGhosts = backtrackGhosts or {}
+
+                -- Update history
                 replicationInterface.operateOnAllEntries(function(player, entry)
                     if not entry._isEnemy then return end
+                    local pos = entry._receivedPosition
+                    if not pos then return end
 
-                    local thirdPerson = entry._thirdPersonObject
-                    if not thirdPerson then return end
+                    local root = entry._thirdPersonObject and entry._thirdPersonObject._rootPart
+                    backtrackHistory[player] = backtrackHistory[player] or {}
 
-                    local character = thirdPerson._character
-                    local rootPart  = thirdPerson._rootPart
-                    local receivedPos = entry._receivedPosition
+                    table.insert(backtrackHistory[player], 1, {
+                        time = clockTime,
+                        pos = pos,
+                        cframe = root and root.CFrame or CFrame.new(pos)
+                    })
 
-                    -- Solid CFrame to place the ghost
-                    local rootCFrame
-                    if rootPart and rootPart.Parent then
-                        rootCFrame = rootPart.CFrame
-                    elseif receivedPos then
-                        rootCFrame = CFrame.new(receivedPos)
-                    else
-                        return
+                    while #backtrackHistory[player] > 12 do
+                        table.remove(backtrackHistory[player])
                     end
+                end)
 
-                    local clone
-                    local usedRealClone = false
+                -- Spawn ghosts
+                if clockTime > (backtrackTime or 0) + delay then
+                    for _, g in pairs(backtrackGhosts) do
+                        if g and g.Parent then g:Destroy() end
+                    end
+                    table.clear(backtrackGhosts)
 
-                    ----------------------------------------------------------------
-                    -- Prefer a real clone so animations / motor6Ds stay intact
-                    ----------------------------------------------------------------
-                    if wapus:GetValue("Backtracking", "Clone Character") and character and character.Parent then
-                        local ok, result = pcall(function()
-                            return character:Clone()
-                        end)
+                    replicationInterface.operateOnAllEntries(function(player, entry)
+                        if not entry._isEnemy then return end
+                        local hist = backtrackHistory[player]
+                        if not hist or #hist < 3 then return end
 
-                        if ok and result then
-                            clone = result
-                            usedRealClone = true
+                        local snap = hist[math.clamp(math.floor(#hist * 0.55), 2, #hist)]
+                        if not snap or (clockTime - snap.time) > 0.4 then return end
 
-                            -- Clean up scripts/sounds so they don't run
-                            for _, d in ipairs(clone:GetDescendants()) do
-                                if d:IsA("BasePart") then
-                                    d.Anchored = true
-                                    d.CanCollide = false
-                                    d.CanQuery = false
-                                    d.CanTouch = false
-                                elseif d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Sound") or d:IsA("ParticleEmitter") then
-                                    d:Destroy()
-                                end
+                        local ghost = Instance.new("Model")
+                        ghost.Name = player.Name .. "_BT"
+
+                        local function make(name, size, offset)
+                            local p = Instance.new("Part")
+                            p.Name = name
+                            p.Size = size
+                            p.CFrame = snap.cframe * CFrame.new(offset)
+                            p.Anchored = true
+                            p.CanCollide = false
+                            p.CanQuery = true
+                            p.Material = material
+                            p.Color = color
+                            p.Transparency = transparency
+                            p.Parent = ghost
+                        end
+
+                        make("Head",     Vector3.new(1.3, 1.3, 1.3), Vector3.new(0, 1.55, 0))
+                        make("Torso",    Vector3.new(2.1, 2.3, 1.1), Vector3.new(0, 0.25, 0))
+                        make("LeftArm",  Vector3.new(0.9, 2.1, 0.9), Vector3.new(-1.35, 0.45, 0))
+                        make("RightArm", Vector3.new(0.9, 2.1, 0.9), Vector3.new(1.35, 0.45, 0))
+                        make("LeftLeg",  Vector3.new(0.9, 2.4, 0.9), Vector3.new(-0.5, -1.45, 0))
+                        make("RightLeg", Vector3.new(0.9, 2.4, 0.9), Vector3.new(0.5, -1.45, 0))
+
+                        ghost:SetAttribute("BT_Player", player.UserId)
+                        ghost:SetAttribute("BT_Pos", snap.pos)
+
+                        ghost.Parent = backtrackObjects
+                        backtrackGhosts[player] = ghost
+
+                        task.delay(duration, function()
+                            if ghost and ghost.Parent then ghost:Destroy() end
+                            if backtrackGhosts[player] == ghost then
+                                backtrackGhosts[player] = nil
                             end
+                        end)
+                    end)
 
-                            -- Make sure the clone is posed exactly like the live character
-                            if clone.PrimaryPart then
-                                clone:SetPrimaryPartCFrame(rootCFrame)
-                            else
-                                -- brute-force if PrimaryPart is missing
-                                local liveRoot = rootPart or character:FindFirstChild("HumanoidRootPart")
-                                if liveRoot then
-                                    local offset = rootCFrame * liveRoot.CFrame:Inverse()
-                                    for _, d in ipairs(clone:GetDescendants()) do
-                                        if d:IsA("BasePart") then
-                                            d.CFrame = offset * d.CFrame
+                    backtrackTime = clockTime
+                end
+            end
+
+            -- ===== AUTO HIT REDIRECTION (works with normal shooting) =====
+            -- This hooks the network so any bullet that hits a ghost damages the real player
+            if not backtrackHitHooked then
+                backtrackHitHooked = true
+
+                local oldSend = network.send
+                network.send = function(self, name, ...)
+                    local args = {...}
+
+                    -- When the game sends a normal bullethit, check if we actually hit a ghost instead
+                    if name == "bullethit" and wapus:GetValue("Backtracking", "Enabled") then
+                        local weaponId, victim, hitPos, hitPart, ticket, time = table.unpack(args)
+
+                        -- Ray from camera/barrel toward the reported hit to see if a ghost is in the way
+                        local origin = workspace.CurrentCamera.CFrame.Position
+                        local dir = (hitPos - origin)
+                        local dist = dir.Magnitude
+
+                        local params = RaycastParams.new()
+                        params.FilterType = Enum.RaycastFilterType.Include
+                        params.FilterDescendantsInstances = {backtrackObjects}
+
+                        local result = workspace:Raycast(origin, dir.Unit * (dist + 5), params)
+                        if result and result.Instance then
+                            local model = result.Instance:FindFirstAncestorOfClass("Model")
+                            if model then
+                                local userId = model:GetAttribute("BT_Player")
+                                local oldPos = model:GetAttribute("BT_Pos")
+
+                                if userId and oldPos then
+                                    for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+                                        if plr.UserId == userId then
+                                            -- Redirect the hit to the real player at the old position
+                                            return oldSend(self, "bullethit", weaponId, plr, oldPos, "Head", ticket, time)
                                         end
                                     end
                                 end
@@ -5882,84 +5943,10 @@ LPH_JIT_MAX(function() -- Main Cheat
                         end
                     end
 
-                    ----------------------------------------------------------------
-                    -- Fallback static proxy (no animation)
-                    ----------------------------------------------------------------
-                    if not clone then
-                        clone = Instance.new("Model")
-                        clone.Name = player.Name .. "_BT"
-
-                        local function makePart(name, size, offset)
-                            local p = Instance.new("Part")
-                            p.Name = name
-                            p.Size = size
-                            p.CFrame = rootCFrame * CFrame.new(offset)
-                            p.Anchored = true
-                            p.CanCollide = false
-                            p.CanQuery = false
-                            p.CanTouch = false
-                            p.Material = Enum.Material.SmoothPlastic
-                            p.Parent = clone
-                            return p
-                        end
-
-                        makePart("Head",     Vector3.new(1.2, 1.2, 1.2), Vector3.new(0, 1.55, 0))
-                        makePart("Torso",    Vector3.new(2, 2.2, 1),     Vector3.new(0, 0.2, 0))
-                        makePart("LeftArm",  Vector3.new(0.85, 2, 0.85), Vector3.new(-1.3, 0.4, 0))
-                        makePart("RightArm", Vector3.new(0.85, 2, 0.85), Vector3.new(1.3, 0.4, 0))
-                        makePart("LeftLeg",  Vector3.new(0.85, 2.3, 0.85), Vector3.new(-0.45, -1.4, 0))
-                        makePart("RightLeg", Vector3.new(0.85, 2.3, 0.85), Vector3.new(0.45, -1.4, 0))
-                    end
-
-                    clone.Name = player.Name
-                    clone.Parent = backtrackObjects
-
-                    ----------------------------------------------------------------
-                    -- Apply chams AFTER parenting (important)
-                    ----------------------------------------------------------------
-                    local props = {
-                        Material     = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
-                        Transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01,
-                        Color        = wapus:GetValue("Backtracking", "Character Color"),
-                        CanCollide   = false
-                    }
-
-                    local uncache
-                    local ok, result = pcall(function()
-                        return cham.new(clone, props, false, true, false)
-                    end)
-                    if ok then
-                        -- most cham libs return (properties, uncache) or just the uncache function
-                        uncache = type(result) == "function" and result or select(2, result)
-                    end
-
-                    ----------------------------------------------------------------
-                    -- Auto destroy + fade
-                    ----------------------------------------------------------------
-                    task.delay(wapus:GetValue("Backtracking", "Character Duration"), function()
-                        if not (clone and clone.Parent) then return end
-
-                        local steps = 5
-                        local step = (1 - props.Transparency) / steps
-                        for i = 1, steps do
-                            if not clone.Parent then break end
-                            for _, d in ipairs(clone:GetDescendants()) do
-                                if d:IsA("BasePart") then
-                                    d.Transparency = math.min(1, d.Transparency + step)
-                                end
-                            end
-                            task.wait(0.04)
-                        end
-
-                        clone:Destroy()
-                        if uncache then pcall(uncache) end
-                    end)
-                end)
-
-                backtrackTime = clockTime
+                    return oldSend(self, name, ...)
+                end
             end
-        end
-    end));
+            -- ===================== END BACKTRACK =====================
 
     local aimTime;
 
@@ -6054,6 +6041,11 @@ LPH_JIT_MAX(function() -- Main Cheat
         thirdPersonObject.setCharacterRender = setCharacterRender
         charObject.setBaseWalkSpeed = setBaseWalkSpeed
         charObject.jump = jump
+        for _, ghost in pairs(backtrackGhosts) do
+    if ghost and ghost.Parent then ghost:Destroy() end
+        end
+        table.clear(backtrackGhosts)
+        table.clear(backtrackHistory)
 
         backtrackObjects:Destroy()
         hitboxObjects:Destroy()
