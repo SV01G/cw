@@ -5813,140 +5813,122 @@ LPH_JIT_MAX(function() -- Main Cheat
             end)
         end
 
-            -- ===================== BACKTRACK (VISUAL + AUTO HIT) =====================
-            if wapus:GetValue("Backtracking", "Enabled") then
-                local refresh = math.max(wapus:GetValue("Backtracking", "Refresh Rate"), 1)
-                local delay = 1 / refresh
-                local duration = wapus:GetValue("Backtracking", "Character Duration")
-                local transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01
-                local material = Enum.Material[wapus:GetValue("Backtracking", "Character Material")]
-                local color = wapus:GetValue("Backtracking", "Character Color")
+-- ===================== BACKTRACK (VISUAL + HIT) =====================
+if wapus:GetValue("Backtracking", "Enabled") then
+    local refresh = math.max(wapus:GetValue("Backtracking", "Refresh Rate"), 1)
+    local delay = 1 / refresh
+    local duration = wapus:GetValue("Backtracking", "Character Duration")
+    local transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01
+    local material = Enum.Material[wapus:GetValue("Backtracking", "Character Material")]
+    local color = wapus:GetValue("Backtracking", "Character Color")
 
-                backtrackHistory = backtrackHistory or {}
-                backtrackGhosts = backtrackGhosts or {}
+    backtrackHistory = backtrackHistory or {}
+    backtrackGhosts = backtrackGhosts or {}
 
-                -- Update history
-                replicationInterface.operateOnAllEntries(function(player, entry)
-                    if not entry._isEnemy then return end
-                    local pos = entry._receivedPosition
-                    if not pos then return end
+    -- Update position history
+    replicationInterface.operateOnAllEntries(function(player, entry)
+        if not entry._isEnemy then return end
+        local pos = entry._receivedPosition
+        if not pos then return end
 
-                    local root = entry._thirdPersonObject and entry._thirdPersonObject._rootPart
-                    backtrackHistory[player] = backtrackHistory[player] or {}
+        local root = entry._thirdPersonObject and entry._thirdPersonObject._rootPart
+        backtrackHistory[player] = backtrackHistory[player] or {}
 
-                    table.insert(backtrackHistory[player], 1, {
-                        time = clockTime,
-                        pos = pos,
-                        cframe = root and root.CFrame or CFrame.new(pos)
-                    })
+        table.insert(backtrackHistory[player], 1, {
+            time = clockTime,
+            pos = pos,
+            cframe = root and root.CFrame or CFrame.new(pos)
+        })
 
-                    while #backtrackHistory[player] > 12 do
-                        table.remove(backtrackHistory[player])
-                    end
-                end)
+        while #backtrackHistory[player] > 12 do
+            table.remove(backtrackHistory[player])
+        end
+    end)
 
-                -- Spawn ghosts
-                if clockTime > (backtrackTime or 0) + delay then
-                    for _, g in pairs(backtrackGhosts) do
-                        if g and g.Parent then g:Destroy() end
-                    end
-                    table.clear(backtrackGhosts)
+    -- Spawn ghosts
+    if clockTime > (backtrackTime or 0) + delay then
+        for _, g in pairs(backtrackGhosts) do
+            if g and g.Parent then g:Destroy() end
+        end
+        table.clear(backtrackGhosts)
 
-                    replicationInterface.operateOnAllEntries(function(player, entry)
-                        if not entry._isEnemy then return end
-                        local hist = backtrackHistory[player]
-                        if not hist or #hist < 3 then return end
+        replicationInterface.operateOnAllEntries(function(player, entry)
+            if not entry._isEnemy then return end
+            local hist = backtrackHistory[player]
+            if not hist or #hist < 3 then return end
 
-                        local snap = hist[math.clamp(math.floor(#hist * 0.55), 2, #hist)]
-                        if not snap or (clockTime - snap.time) > 0.4 then return end
+            local snap = hist[math.clamp(math.floor(#hist * 0.55), 2, #hist)]
+            if not snap or (clockTime - snap.time) > 0.4 then return end
 
-                        local ghost = Instance.new("Model")
-                        ghost.Name = player.Name .. "_BT"
+            local ghost = Instance.new("Model")
+            ghost.Name = player.Name .. "_BT"
 
-                        local function make(name, size, offset)
-                            local p = Instance.new("Part")
-                            p.Name = name
-                            p.Size = size
-                            p.CFrame = snap.cframe * CFrame.new(offset)
-                            p.Anchored = true
-                            p.CanCollide = false
-                            p.CanQuery = true
-                            p.Material = material
-                            p.Color = color
-                            p.Transparency = transparency
-                            p.Parent = ghost
-                        end
-
-                        make("Head",     Vector3.new(1.3, 1.3, 1.3), Vector3.new(0, 1.55, 0))
-                        make("Torso",    Vector3.new(2.1, 2.3, 1.1), Vector3.new(0, 0.25, 0))
-                        make("LeftArm",  Vector3.new(0.9, 2.1, 0.9), Vector3.new(-1.35, 0.45, 0))
-                        make("RightArm", Vector3.new(0.9, 2.1, 0.9), Vector3.new(1.35, 0.45, 0))
-                        make("LeftLeg",  Vector3.new(0.9, 2.4, 0.9), Vector3.new(-0.5, -1.45, 0))
-                        make("RightLeg", Vector3.new(0.9, 2.4, 0.9), Vector3.new(0.5, -1.45, 0))
-
-                        ghost:SetAttribute("BT_Player", player.UserId)
-                        ghost:SetAttribute("BT_Pos", snap.pos)
-
-                        ghost.Parent = backtrackObjects
-                        backtrackGhosts[player] = ghost
-
-                        task.delay(duration, function()
-                            if ghost and ghost.Parent then ghost:Destroy() end
-                            if backtrackGhosts[player] == ghost then
-                                backtrackGhosts[player] = nil
-                            end
-                        end)
-                    end)
-
-                    backtrackTime = clockTime
-                end
+            local function make(name, size, offset)
+                local p = Instance.new("Part")
+                p.Name = name
+                p.Size = size
+                p.CFrame = snap.cframe * CFrame.new(offset)
+                p.Anchored = true
+                p.CanCollide = false
+                p.CanQuery = true
+                p.Material = material
+                p.Color = color
+                p.Transparency = transparency
+                p.Parent = ghost
             end
 
-            -- ===== AUTO HIT REDIRECTION (works with normal shooting) =====
-            -- This hooks the network so any bullet that hits a ghost damages the real player
-            if not backtrackHitHooked then
-                backtrackHitHooked = true
+            make("Head",     Vector3.new(1.3, 1.3, 1.3), Vector3.new(0, 1.55, 0))
+            make("Torso",    Vector3.new(2.1, 2.3, 1.1), Vector3.new(0, 0.25, 0))
+            make("LeftArm",  Vector3.new(0.9, 2.1, 0.9), Vector3.new(-1.35, 0.45, 0))
+            make("RightArm", Vector3.new(0.9, 2.1, 0.9), Vector3.new(1.35, 0.45, 0))
+            make("LeftLeg",  Vector3.new(0.9, 2.4, 0.9), Vector3.new(-0.5, -1.45, 0))
+            make("RightLeg", Vector3.new(0.9, 2.4, 0.9), Vector3.new(0.5, -1.45, 0))
 
-                local oldSend = network.send
-                network.send = function(self, name, ...)
-                    local args = {...}
+            ghost:SetAttribute("BT_Player", player.UserId)
+            ghost:SetAttribute("BT_Pos", snap.pos)
 
-                    -- When the game sends a normal bullethit, check if we actually hit a ghost instead
-                    if name == "bullethit" and wapus:GetValue("Backtracking", "Enabled") then
-                        local weaponId, victim, hitPos, hitPart, ticket, time = table.unpack(args)
+            ghost.Parent = backtrackObjects
+            backtrackGhosts[player] = ghost
 
-                        -- Ray from camera/barrel toward the reported hit to see if a ghost is in the way
-                        local origin = workspace.CurrentCamera.CFrame.Position
-                        local dir = (hitPos - origin)
-                        local dist = dir.Magnitude
-
-                        local params = RaycastParams.new()
-                        params.FilterType = Enum.RaycastFilterType.Include
-                        params.FilterDescendantsInstances = {backtrackObjects}
-
-                        local result = workspace:Raycast(origin, dir.Unit * (dist + 5), params)
-                        if result and result.Instance then
-                            local model = result.Instance:FindFirstAncestorOfClass("Model")
-                            if model then
-                                local userId = model:GetAttribute("BT_Player")
-                                local oldPos = model:GetAttribute("BT_Pos")
-
-                                if userId and oldPos then
-                                    for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
-                                        if plr.UserId == userId then
-                                            -- Redirect the hit to the real player at the old position
-                                            return oldSend(self, "bullethit", weaponId, plr, oldPos, "Head", ticket, time)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-
-                    return oldSend(self, name, ...)
+            task.delay(duration, function()
+                if ghost and ghost.Parent then ghost:Destroy() end
+                if backtrackGhosts[player] == ghost then
+                    backtrackGhosts[player] = nil
                 end
+            end)
+        end)
+
+        backtrackTime = clockTime
+    end
+
+    -- ===== HIT REDIRECTION (works with rage / silent aim bullets) =====
+    -- This runs every Stepped while backtrack is enabled
+    local function tryHitGhost(origin, direction, maxDist)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Include
+        params.FilterDescendantsInstances = {backtrackObjects}
+
+        local result = workspace:Raycast(origin, direction.Unit * (maxDist or 800), params)
+        if not result or not result.Instance then return end
+
+        local model = result.Instance:FindFirstAncestorOfClass("Model")
+        if not model then return end
+
+        local userId = model:GetAttribute("BT_Player")
+        local oldPos = model:GetAttribute("BT_Pos")
+        if not userId or not oldPos then return end
+
+        for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+            if plr.UserId == userId then
+                return plr, oldPos
             end
-            -- ===================== END BACKTRACK =====================
+        end
+    end
+
+    -- Store the function so other parts of the script can use it
+    getBacktrackHit = tryHitGhost
+end
+-- ===================== END BACKTRACK =====================
 
     local aimTime;
 
