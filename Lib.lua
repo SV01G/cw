@@ -1145,13 +1145,13 @@ do -- UI Library
     wapus = {
         toggleKeybind = "RightShift",
         theme = {
-            accent = Color3.fromRGB(0, 220, 190),       -- neon teal/cyan accent
-            text = Color3.fromRGB(230, 240, 255),
-            background = Color3.fromRGB(14, 16, 22),   -- deep near-black
-            lightbackground = Color3.fromRGB(26, 30, 42), -- dark slate panel
-            hidden = Color3.fromRGB(8, 9, 14),          -- darker hidden bg
-            hiddenText = Color3.fromRGB(160, 185, 220),
-            outline = Color3.fromRGB(45, 55, 80),       -- subtle slate outline
+            accent = Color3.fromRGB(0, 200, 170),
+            text = Color3.fromRGB(225, 235, 255),
+            background = Color3.fromRGB(13, 15, 21),
+            lightbackground = Color3.fromRGB(24, 28, 40),
+            hidden = Color3.fromRGB(8, 9, 13),
+            hiddenText = Color3.fromRGB(150, 170, 210),
+            outline = Color3.fromRGB(40, 48, 70),
             --fontData = game:HttpGet("https://get.fontspace.co/download/font/g0P4/YzVlMTg1YTgwOGNhNGQyYjljZDFiNmI0NjMxNGY0YzgudHRm/EpilepsySans-g0P4.ttf") -- miss krampus
         },
         menus = {},
@@ -2873,9 +2873,15 @@ LPH_JIT_MAX(function() -- Main Cheat
     local silentaimfov = drawing.new("Circle")
     local silentaimdeadfov = drawing.new("Circle")
     local aimassistfov = drawing.new("Circle")
-    local watermarkText = drawing.new("Text")
-    local watermarkBg = drawing.new("Square")
-    local watermarkOutline = drawing.new("Square")
+
+    -- Watermark drawing objects (always alive, toggled via Visible)
+    local wmOutline  = drawing.new("Square")
+    local wmBg       = drawing.new("Square")
+    local wmAccent   = drawing.new("Square")  -- teal left-edge bar
+    local wmTitle    = drawing.new("Text")    -- cheat name
+    local wmUser     = drawing.new("Text")    -- local player name
+    local wmSep      = drawing.new("Square")  -- thin separator line
+
     local crossdot = drawing.new("Square")
     local cross1 = drawing.new("Line")
     local cross2 = drawing.new("Line")
@@ -5972,89 +5978,130 @@ LPH_JIT_MAX(function() -- Main Cheat
         end
         aimTime = aimbotting and aimTime
 
-        -- Aim Assist: gentle magnetism that nudges camera toward nearest target
+        -- Aim Assist: soft magnetism toward nearest enemy, independent of full aimbot
         if wapus:GetValue("Aim Assist", "Enabled") and (not wapus:GetValue("Aim Assist", "Only While Aiming") or aiming) then
-            local aaFov = wapus:GetValue("Aim Assist", "FOV Radius")
-            local aaTarget, aaEntry, aaPart = getClosest(
+            local aaRadius = wapus:GetValue("Aim Assist", "FOV Radius")
+            local aaTarget, aaEntry = getClosest(
                 camera.ViewportSize * 0.5,
-                aaFov,
+                aaRadius,
                 nil,
                 wapus:GetValue("Aim Assist", "Visible Check"),
                 wapus:GetValue("Aim Assist", "Target Part")
             )
 
-            if aaTarget and aaEntry then
-                local player = aaEntry._player
+            if aaTarget and aaEntry and not aimbotting then
+                local aaPlayer = aaEntry._player
                 local cameraObj = cameraInterface.getActiveCamera()
-                local screenPos, onScreen = camera:WorldToViewportPoint(aaTarget)
+                local aaStrength = wapus:GetValue("Aim Assist", "Strength") * 0.01
+                local aaSmoothness = wapus:GetValue("Aim Assist", "Smoothness")
 
-                if onScreen and screenPos.Z > 0 then
-                    local strength = wapus:GetValue("Aim Assist", "Strength") * 0.01
-                    local smoothing = wapus:GetValue("Aim Assist", "Smoothness")
-                    local vel = (movementCache.position[player] and movementCache.position[player][1] and movementCache.position[player][5]) and
-                        (movementCache.position[player][5] - movementCache.position[player][1]) / math.max(movementCache.time[1] - (movementCache.time[5] or movementCache.time[1] - 0.1), 0.01) or Vector3.zero
-                    local predictedTarget = aaTarget + vel * 0.08
+                -- velocity prediction using movement cache
+                local aaVel = Vector3.zero
+                local mp = movementCache.position[aaPlayer]
+                local mt = movementCache.time
+                if mp and mp[5] and mp[1] and mt[5] and mt[1] and (mt[1] - mt[5]) ~= 0 then
+                    aaVel = (mp[1] - mp[5]) / (mt[1] - mt[5])
+                end
 
-                    local velocity, _ = complexTrajectory(
-                        camera.CFrame * Vector3.new(0, 0, 0.5),
-                        publicSettings.bulletAcceleration,
-                        predictedTarget,
-                        weapon and weapon._weaponData and weapon._weaponData.bulletspeed or 10000,
-                        vel
-                    )
+                local predictedTarget = aaTarget + aaVel * 0.06
+                local aaVelocity = complexTrajectory(
+                    camera.CFrame * Vector3.new(0, 0, 0.5),
+                    publicSettings.bulletAcceleration,
+                    predictedTarget,
+                    weapon and weapon._weaponData and weapon._weaponData.bulletspeed or 10000,
+                    aaVel
+                )
 
-                    if velocity then
-                        local vx, vy = toanglesyx(velocity)
-                        local cy = cameraObj._angles.y
-                        local x = math.clamp(vx, cameraObj._minAngle or -math.pi/2, cameraObj._maxAngle or math.pi/2)
-                        local y = (vy + pi - cy) % tau - pi + cy
-                        local aimAngles = Vector3.new(x, y, 0)
-                        local blended = cameraObj._angles:lerp(aimAngles, (1 - smoothing) * strength)
-                        cameraObj._delta = (blended - cameraObj._angles) / deltaTime
-                        cameraObj._angles = blended
-                    end
+                if aaVelocity then
+                    local vx, vy = toanglesyx(aaVelocity)
+                    local cameraObj2 = cameraInterface.getActiveCamera()
+                    local cy = cameraObj2._angles.y
+                    local targetX = math.clamp(vx, cameraObj2._minAngle or -math.pi*0.5, cameraObj2._maxAngle or math.pi*0.5)
+                    local targetY = (vy + pi - cy) % tau - pi + cy
+                    local targetAngles = Vector3.new(targetX, targetY, 0)
+                    local lerpFactor = math.clamp((1 - aaSmoothness) * aaStrength, 0, 1)
+                    local newAngles = cameraObj2._angles:lerp(targetAngles, lerpFactor)
+                    cameraObj2._delta = (newAngles - cameraObj2._angles) / deltaTime
+                    cameraObj2._angles = newAngles
                 end
             end
         end
 
-        -- Watermark rendering
+        -- Watermark: styled like the UI — outline + dark bg + teal accent bar + text
         do
-            local wmEnabled = wapus:GetValue("Tweaks", "Watermark")
-            watermarkBg.Visible = wmEnabled == true
-            watermarkOutline.Visible = wmEnabled == true
-            watermarkText.Visible = wmEnabled == true
+            local wmOn = wapus:GetValue("Tweaks", "Watermark") == true
+            if wmOn then
+                local cheatName = defaultUIName
+                local userName2 = game:GetService("Players").LocalPlayer.Name
+                local padding = 8
+                local accentW = 3
+                local textGap = 2
 
-            if wmEnabled then
-                local wmLabel = (wapus:GetValue("Tweaks", "Watermark Text") or defaultUIName)
-                local fps = math.floor(1 / (deltaTime + 0.0001))
-                local timeStr = string.format("%02d:%02d", math.floor(clockTime / 60) % 60, math.floor(clockTime) % 60)
-                local fullText = wmLabel .. "  |  " .. fps .. " fps  |  " .. timeStr
+                wmTitle.Text = cheatName
+                wmTitle.Size = 14
+                wmTitle.Color = wapus.theme.text
+                wmTitle.Outline = true
+                wmTitle.OutlineColor = Color3.new(0, 0, 0)
+                wmTitle.Visible = true
 
-                watermarkText.Text = fullText
-                watermarkText.Size = 14
-                watermarkText.Color = wapus.theme.text
-                watermarkText.Outline = true
-                watermarkText.OutlineColor = Color3.new(0, 0, 0)
-                watermarkText.Visible = true
+                wmUser.Text = userName2
+                wmUser.Size = 13
+                wmUser.Color = wapus.theme.accent
+                wmUser.Outline = true
+                wmUser.OutlineColor = Color3.new(0, 0, 0)
+                wmUser.Visible = true
 
-                local textBounds = watermarkText.TextBounds or Vector2.new(#fullText * 7.5, 14)
-                local padding = Vector2.new(10, 5)
-                local wmPos = Vector2.new(8, 8)
-                local wmSize = textBounds + padding * 2
+                local titleW = wmTitle.TextBounds.X
+                local userW  = wmUser.TextBounds.X
+                local innerW = math.max(titleW, userW) + padding * 2
+                local innerH = 14 + textGap + 13 + padding * 2  -- title + gap + username + top/bot pad
+                local totalW = accentW + innerW
+                local totalH = innerH
 
-                watermarkOutline.Position = wmPos - Vector2.new(1, 1)
-                watermarkOutline.Size = wmSize + Vector2.new(2, 2)
-                watermarkOutline.Color = wapus.theme.outline
-                watermarkOutline.Filled = true
-                watermarkOutline.Visible = true
+                local wmX = 8
+                local wmY = 8
 
-                watermarkBg.Position = wmPos
-                watermarkBg.Size = wmSize
-                watermarkBg.Color = wapus.theme.background
-                watermarkBg.Filled = true
-                watermarkBg.Visible = true
+                -- outline (1px border)
+                wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
+                wmOutline.Size     = Vector2.new(totalW + 2, totalH + 2)
+                wmOutline.Color    = wapus.theme.outline
+                wmOutline.Filled   = true
+                wmOutline.Visible  = true
 
-                watermarkText.Position = wmPos + padding - Vector2.new(0, 1)
+                -- dark background
+                wmBg.Position = Vector2.new(wmX, wmY)
+                wmBg.Size     = Vector2.new(totalW, totalH)
+                wmBg.Color    = wapus.theme.background
+                wmBg.Filled   = true
+                wmBg.Visible  = true
+
+                -- teal left-edge accent bar
+                wmAccent.Position = Vector2.new(wmX, wmY)
+                wmAccent.Size     = Vector2.new(accentW, totalH)
+                wmAccent.Color    = wapus.theme.accent
+                wmAccent.Filled   = true
+                wmAccent.Visible  = true
+
+                local textX = wmX + accentW + padding
+                -- cheat name (top line)
+                wmTitle.Position = Vector2.new(textX, wmY + padding - 1)
+
+                -- username (bottom line)
+                wmUser.Position = Vector2.new(textX, wmY + padding + 14 + textGap)
+
+                -- thin separator between the two text lines
+                wmSep.Position = Vector2.new(wmX + accentW, wmY + padding + 14 + math.floor(textGap * 0.5))
+                wmSep.Size     = Vector2.new(innerW, 1)
+                wmSep.Color    = wapus.theme.outline
+                wmSep.Filled   = true
+                wmSep.Visible  = true
+            else
+                wmOutline.Visible = false
+                wmBg.Visible      = false
+                wmAccent.Visible  = false
+                wmTitle.Visible   = false
+                wmUser.Visible    = false
+                wmSep.Visible     = false
             end
         end
 
@@ -6074,15 +6121,15 @@ LPH_JIT_MAX(function() -- Main Cheat
         silentaimdeadfov.Position = circlePos
         aimassistfov.Position = circlePos
 
-        -- Aim Assist FOV circle visibility
+        -- Aim Assist FOV circle
         local aaShowFov = wapus:GetValue("Aim Assist", "Enabled") and wapus:GetValue("Aim Assist", "Show FOV")
         aimassistfov.Visible = aaShowFov == true
         if aaShowFov then
             aimassistfov.Radius = wapus:GetValue("Aim Assist", "FOV Radius")
-            aimassistfov.Color = wapus:GetValue("Aim Assist", "FOV Color") or Color3.fromRGB(0, 220, 190)
+            aimassistfov.Color = wapus:GetValue("Aim Assist", "FOV Color") or Color3.fromRGB(0, 200, 170)
             aimassistfov.Thickness = 1
             aimassistfov.Filled = false
-            aimassistfov.Transparency = 0.6
+            aimassistfov.Transparency = 0.55
         end
 
         if wapus:GetValue("FOV Settings", "Dynamic FOV") then
@@ -6251,18 +6298,16 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
         local userThemeData = httpService:JSONDecode(readfile(folderName .. "/theme.json"))
         title = (userThemeData.Title == "Wapus" and defaultUIName) or userThemeData.Title
         -- if the user theme still contains the old default purple accent, update it to blue
-        -- migrate old purple OR old blue accent to new neon teal palette
-        local acc = userThemeData["Accent Color"]
-        if acc and ((acc[1] == 127 and acc[2] == 72 and acc[3] == 163) or (acc[1] == 84 and acc[2] == 154 and acc[3] == 255)) then
-            userThemeData["Accent Color"] = {0, 220, 190}
-            userThemeData["Background Color"] = {14, 16, 22}
-            userThemeData["Light Background Color"] = {26, 30, 42}
-            userThemeData["Hidden Color"] = {8, 9, 14}
-            userThemeData["Hidden Text Color"] = {160, 185, 220}
-            userThemeData["Outline Color"] = {45, 55, 80}
+        local _acc = userThemeData["Accent Color"]
+        if _acc and ((_acc[1]==127 and _acc[2]==72 and _acc[3]==163) or (_acc[1]==84 and _acc[2]==154 and _acc[3]==255)) then
+            userThemeData["Accent Color"] = {0, 200, 170}
+            userThemeData["Background Color"] = {13, 15, 21}
+            userThemeData["Light Background Color"] = {24, 28, 40}
+            userThemeData["Hidden Color"] = {8, 9, 13}
+            userThemeData["Hidden Text Color"] = {150, 170, 210}
+            userThemeData["Outline Color"] = {40, 48, 70}
             writefile(folderName .. "/theme.json", httpService:JSONEncode(userThemeData))
         end
-        -- end migration
 
         wapus.theme = {
             accent = Color3.fromRGB(table.unpack(userThemeData["Accent Color"])),
@@ -6276,13 +6321,13 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     else
         local themeData = {
             ["Title"] = defaultUIName,
-            ["Accent Color"] = {0, 220, 190},
-            ["Text Color"] = {230, 240, 255},
-            ["Background Color"] = {14, 16, 22},
-            ["Light Background Color"] = {26, 30, 42},
-            ["Hidden Color"] = {8, 9, 14},
-            ["Hidden Text Color"] = {160, 185, 220},
-            ["Outline Color"] = {45, 55, 80}
+            ["Accent Color"] = {0, 200, 170},
+            ["Text Color"] = {225, 235, 255},
+            ["Background Color"] = {13, 15, 21},
+            ["Light Background Color"] = {24, 28, 40},
+            ["Hidden Color"] = {8, 9, 13},
+            ["Hidden Text Color"] = {150, 170, 210},
+            ["Outline Color"] = {40, 48, 70}
         }
 
         writefile(folderName .. "/theme.json", httpService:JSONEncode(themeData))
@@ -6371,8 +6416,9 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     local misc = menu:CreateTab("Misc")
     local settings = menu:CreateTab("Settings")
 
-    local aimbot = legit:CreateSection("Aim Bot", false, "half")
-    local fovsettings = aimbot:AddSection("FOV Settings", false, "half")
+    local aimbot = legit:CreateSection("Aim Bot", false, "whole")
+    local fovsettings = aimbot:AddSection("FOV Settings")
+    local aimassistsec = aimbot:AddSection("Aim Assist")
     local silentaim = legit:CreateSection("Silent Aim", true, "half")
     local backtrack = legit:CreateSection("Backtracking", false, "half")
     local hitboxes = backtrack:AddSection("Hit Boxes")
@@ -6417,16 +6463,14 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     fovsettings:AddSlider("Circle Opacity", 100, 1, 100, 1, "%", getCallback("FOV Settings%%Circle Opacity"))
     fovsettings:AddToggle("Fill Circles", false, getCallback("FOV Settings%%Fill Circles"))
 
-    -- Aim Assist section (mouse magnetism, lighter than full aimbot)
-    local aimassist = legit:CreateSection("Aim Assist", false, "half")
-    aimassist:AddToggle("Enabled", false, getCallback("Aim Assist%%Enabled")):AddKeyBind(nil, "Aim Assist Bind")
-    aimassist:AddToggle("Visible Check", false, getCallback("Aim Assist%%Visible Check"))
-    aimassist:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
-    aimassist:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
-    aimassist:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
-    aimassist:AddSlider("FOV Radius", 200, 10, 800, 5, " px", getCallback("Aim Assist%%FOV Radius"))
-    aimassist:AddToggle("Only While Aiming", true, getCallback("Aim Assist%%Only While Aiming"))
-    aimassist:AddToggle("Show FOV", false, getCallback("Aim Assist%%Show FOV")):AddColorPicker("FOV Color", Color3.fromRGB(0, 220, 190), getCallback("Aim Assist%%FOV Color"))
+    aimassistsec:AddToggle("Enabled", false, getCallback("Aim Assist%%Enabled")):AddKeyBind(nil, "Aim Assist Bind")
+    aimassistsec:AddToggle("Visible Check", false, getCallback("Aim Assist%%Visible Check"))
+    aimassistsec:AddToggle("Only While Aiming", true, getCallback("Aim Assist%%Only While Aiming"))
+    aimassistsec:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
+    aimassistsec:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
+    aimassistsec:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
+    aimassistsec:AddSlider("FOV Radius", 200, 10, 800, 5, " px", getCallback("Aim Assist%%FOV Radius"))
+    aimassistsec:AddToggle("Show FOV", false, getCallback("Aim Assist%%Show FOV")):AddColorPicker("FOV Color", Color3.fromRGB(0, 200, 170), getCallback("Aim Assist%%FOV Color"))
 
     silentaim:AddToggle("Enabled", false, getCallback("Silent Aim%%Enabled")):AddKeyBind(nil, "Key Bind")
     silentaim:AddToggle("Visible Check", false, getCallback("Silent Aim%%Visible Check"))
@@ -6629,7 +6673,6 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     sounds:AddDropdown("Footstep Sound", "None", soundFileList, getCallback("Sounds%%Footstep Sound"))
 
     tweaks:AddToggle("Watermark", false, getCallback("Tweaks%%Watermark"))
-    tweaks:AddTextBox("Watermark Text", defaultUIName, getCallback("Tweaks%%Watermark Text"))
     tweaks:AddToggle("Custom Kill Notification", false, getCallback("Tweaks%%Custom Kill Notification"))
     tweaks:AddTextBox("Notification Text", "Chud Gone!", getCallback("Tweaks%%Notification Text"))
     tweaks:AddButton("Unlock All Attachments", getCallback("Tweaks%%Unlock All Attachments"))
@@ -6697,22 +6740,6 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     configuration:AddButton("Update Config List", getCallback("Configuration%%Update Config List"))
     configuration:AddTextBox("Config Name", "New Config", getCallback("Configuration%%Config Name"))
     configuration:AddButton("Save Config", getCallback("Configuration%%Save Config"))
-
-    -- Aim Assist callbacks (no extra logic needed; values read live in RenderStepped)
-    callbackList["Aim Assist%%Enabled"] = function(state)
-        if not state then
-            aimassistfov.Visible = false
-        end
-    end
-
-    -- Watermark callbacks
-    callbackList["Tweaks%%Watermark"] = function(state)
-        if not state then
-            watermarkBg.Visible = false
-            watermarkOutline.Visible = false
-            watermarkText.Visible = false
-        end
-    end
 
     callbackList["Cheat Settings%%Show Keybind List"] = function(bool)
         if bool then
