@@ -6029,8 +6029,6 @@ end
         table.clear(backtrackGhosts)
         table.clear(backtrackHistory)
 
-        backtrackObjects:Destroy()
-        hitboxObjects:Destroy()
     end
     -- now was that so bad?
 end)()
