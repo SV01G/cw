@@ -1145,13 +1145,13 @@ do -- UI Library
     wapus = {
         toggleKeybind = "RightShift",
         theme = {
-            accent = Color3.fromRGB(84, 154, 255),
-            text = Color3.fromRGB(255, 255, 255),
-            background = Color3.fromRGB(12, 22, 42),
-            lightbackground = Color3.fromRGB(24, 44, 76),
-            hidden = Color3.fromRGB(7, 14, 28),
-            hiddenText = Color3.fromRGB(210, 225, 255),
-            outline = Color3.fromRGB(40, 68, 112),
+            accent = Color3.fromRGB(0, 220, 190),       -- neon teal/cyan accent
+            text = Color3.fromRGB(230, 240, 255),
+            background = Color3.fromRGB(14, 16, 22),   -- deep near-black
+            lightbackground = Color3.fromRGB(26, 30, 42), -- dark slate panel
+            hidden = Color3.fromRGB(8, 9, 14),          -- darker hidden bg
+            hiddenText = Color3.fromRGB(160, 185, 220),
+            outline = Color3.fromRGB(45, 55, 80),       -- subtle slate outline
             --fontData = game:HttpGet("https://get.fontspace.co/download/font/g0P4/YzVlMTg1YTgwOGNhNGQyYjljZDFiNmI0NjMxNGY0YzgudHRm/EpilepsySans-g0P4.ttf") -- miss krampus
         },
         menus = {},
@@ -2872,6 +2872,10 @@ LPH_JIT_MAX(function() -- Main Cheat
     local aimbotdeadfov = drawing.new("Circle")
     local silentaimfov = drawing.new("Circle")
     local silentaimdeadfov = drawing.new("Circle")
+    local aimassistfov = drawing.new("Circle")
+    local watermarkText = drawing.new("Text")
+    local watermarkBg = drawing.new("Square")
+    local watermarkOutline = drawing.new("Square")
     local crossdot = drawing.new("Square")
     local cross1 = drawing.new("Line")
     local cross2 = drawing.new("Line")
@@ -5813,122 +5817,120 @@ LPH_JIT_MAX(function() -- Main Cheat
             end)
         end
 
--- ===================== BACKTRACK (VISUAL + HIT) =====================
-if wapus:GetValue("Backtracking", "Enabled") then
-    local refresh = math.max(wapus:GetValue("Backtracking", "Refresh Rate"), 1)
-    local delay = 1 / refresh
-    local duration = wapus:GetValue("Backtracking", "Character Duration")
-    local transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01
-    local material = Enum.Material[wapus:GetValue("Backtracking", "Character Material")]
-    local color = wapus:GetValue("Backtracking", "Character Color")
+        if wapus:GetValue("Backtracking", "Enabled") then
+            local delay = 1 / wapus:GetValue("Backtracking", "Refresh Rate")
 
-    backtrackHistory = backtrackHistory or {}
-    backtrackGhosts = backtrackGhosts or {}
+            if clockTime > backtrackTime + delay then
+                replicationInterface.operateOnAllEntries(function(player, entry)
+                    local entryThirdPersonObject = entry._thirdPersonObject
+                    local character = entryThirdPersonObject and entryThirdPersonObject._character
 
-    -- Update position history
-    replicationInterface.operateOnAllEntries(function(player, entry)
-        if not entry._isEnemy then return end
-        local pos = entry._receivedPosition
-        if not pos then return end
 
-        local root = entry._thirdPersonObject and entry._thirdPersonObject._rootPart
-        backtrackHistory[player] = backtrackHistory[player] or {}
+                    if entry._isEnemy then
+                        local clone
 
-        table.insert(backtrackHistory[player], 1, {
-            time = clockTime,
-            pos = pos,
-            cframe = root and root.CFrame or CFrame.new(pos)
-        })
+                        -- determine a root CFrame to position proxies when character data is missing
+                        local rootCFrame = (entryThirdPersonObject and entryThirdPersonObject._rootPart and entryThirdPersonObject._rootPart.CFrame) or (entry._receivedPosition and CFrame.new(entry._receivedPosition)) or CFrame.new()
 
-        while #backtrackHistory[player] > 12 do
-            table.remove(backtrackHistory[player])
-        end
-    end)
+                        if wapus:GetValue("Backtracking", "Clone Character") and character then
+                            clone = character:Clone()
 
-    -- Spawn ghosts
-    if clockTime > (backtrackTime or 0) + delay then
-        for _, g in pairs(backtrackGhosts) do
-            if g and g.Parent then g:Destroy() end
-        end
-        table.clear(backtrackGhosts)
+                            -- If the cloned character has no BasePart descendants, fall back to a proxy
+                            local hasBase = false
+                            for _, d in ipairs(clone:GetDescendants()) do
+                                if d:IsA("BasePart") then
+                                    hasBase = true
+                                    break
+                                end
+                            end
 
-        replicationInterface.operateOnAllEntries(function(player, entry)
-            if not entry._isEnemy then return end
-            local hist = backtrackHistory[player]
-            if not hist or #hist < 3 then return end
+                            if not hasBase then
+                                local proxy = Instance.new("Model")
 
-            local snap = hist[math.clamp(math.floor(#hist * 0.55), 2, #hist)]
-            if not snap or (clockTime - snap.time) > 0.4 then return end
+                                -- create a simple full-body proxy: head, torso, arms, legs
+                                local parts = {}
+                                local function makePart(name, size, offset)
+                                    local p = Instance.new("Part")
+                                    p.Name = name
+                                    p.Size = size
+                                    p.CFrame = rootCFrame * CFrame.new(offset)
+                                    p.Anchored = true
+                                    p.CanCollide = false
+                                    p.Parent = proxy
+                                    return p
+                                end
 
-            local ghost = Instance.new("Model")
-            ghost.Name = player.Name .. "_BT"
+                                parts.Head = makePart("Head", Vector3.new(1.25, 1.25, 1.25), Vector3.new(0, 1.6, 0))
+                                parts.Torso = makePart("Torso", Vector3.new(2, 2.5, 1), Vector3.new(0, 0.25, 0))
+                                parts.LeftArm = makePart("LeftArm", Vector3.new(0.9, 2, 0.9), Vector3.new(-1.25, 0.5, 0))
+                                parts.RightArm = makePart("RightArm", Vector3.new(0.9, 2, 0.9), Vector3.new(1.25, 0.5, 0))
+                                parts.LeftLeg = makePart("LeftLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(-0.45, -1.5, 0))
+                                parts.RightLeg = makePart("RightLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(0.45, -1.5, 0))
 
-            local function make(name, size, offset)
-                local p = Instance.new("Part")
-                p.Name = name
-                p.Size = size
-                p.CFrame = snap.cframe * CFrame.new(offset)
-                p.Anchored = true
-                p.CanCollide = false
-                p.CanQuery = true
-                p.Material = material
-                p.Color = color
-                p.Transparency = transparency
-                p.Parent = ghost
+                                clone:Destroy()
+                                clone = proxy
+                            end
+                        else
+                            -- create a simple proxy model at the reported position
+                            clone = Instance.new("Model")
+                            -- create a full-body proxy model for non-clone fallback
+                            local function makePart(name, size, offset, parent)
+                                local p = Instance.new("Part")
+                                p.Name = name
+                                p.Size = size
+                                p.CFrame = rootCFrame * CFrame.new(offset)
+                                p.Anchored = true
+                                p.CanCollide = false
+                                p.Parent = parent
+                                return p
+                            end
+
+                            makePart("Head", Vector3.new(1.25, 1.25, 1.25), Vector3.new(0, 1.6, 0), clone)
+                            makePart("Torso", Vector3.new(2, 2.5, 1), Vector3.new(0, 0.25, 0), clone)
+                            makePart("LeftArm", Vector3.new(0.9, 2, 0.9), Vector3.new(-1.25, 0.5, 0), clone)
+                            makePart("RightArm", Vector3.new(0.9, 2, 0.9), Vector3.new(1.25, 0.5, 0), clone)
+                            makePart("LeftLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(-0.45, -1.5, 0), clone)
+                            makePart("RightLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(0.45, -1.5, 0), clone)
+                        end
+
+                        clone.Name = player.Name
+                        local properties = {
+                            Material = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
+                            Transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01,
+                            Color = wapus:GetValue("Backtracking", "Character Color"),
+                            CanCollide = false
+                        }
+
+                        for _, descendant in ipairs(clone:GetDescendants()) do
+                            if descendant:IsA("BasePart") then
+                                descendant.Anchored = true
+                                descendant.CanCollide = false
+                            end
+                        end
+
+                        local _, uncache = cham.new(clone, properties, false, true, false)
+                        clone.Parent = backtrackObjects
+
+                        task.delay(wapus:GetValue("Backtracking", "Character Duration"), function()
+                            local transparency = (1 - properties.Transparency) / 5
+
+                            for transparencyIndex = 1, 5 do
+                                properties.Transparency += transparency
+                                task.wait(0.05)
+                            end
+
+                            clone:Destroy()
+                            if uncache then
+                                uncache() -- you would not believe the lag
+                            end
+                        end)
+                    end
+                end)
+
+                backtrackTime = clockTime
             end
-
-            make("Head",     Vector3.new(1.3, 1.3, 1.3), Vector3.new(0, 1.55, 0))
-            make("Torso",    Vector3.new(2.1, 2.3, 1.1), Vector3.new(0, 0.25, 0))
-            make("LeftArm",  Vector3.new(0.9, 2.1, 0.9), Vector3.new(-1.35, 0.45, 0))
-            make("RightArm", Vector3.new(0.9, 2.1, 0.9), Vector3.new(1.35, 0.45, 0))
-            make("LeftLeg",  Vector3.new(0.9, 2.4, 0.9), Vector3.new(-0.5, -1.45, 0))
-            make("RightLeg", Vector3.new(0.9, 2.4, 0.9), Vector3.new(0.5, -1.45, 0))
-
-            ghost:SetAttribute("BT_Player", player.UserId)
-            ghost:SetAttribute("BT_Pos", snap.pos)
-
-            ghost.Parent = backtrackObjects
-            backtrackGhosts[player] = ghost
-
-            task.delay(duration, function()
-                if ghost and ghost.Parent then ghost:Destroy() end
-                if backtrackGhosts[player] == ghost then
-                    backtrackGhosts[player] = nil
-                end
-            end)
-        end)
-
-        backtrackTime = clockTime
-    end
-
-    -- ===== HIT REDIRECTION (works with rage / silent aim bullets) =====
-    -- This runs every Stepped while backtrack is enabled
-    local function tryHitGhost(origin, direction, maxDist)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Include
-        params.FilterDescendantsInstances = {backtrackObjects}
-
-        local result = workspace:Raycast(origin, direction.Unit * (maxDist or 800), params)
-        if not result or not result.Instance then return end
-
-        local model = result.Instance:FindFirstAncestorOfClass("Model")
-        if not model then return end
-
-        local userId = model:GetAttribute("BT_Player")
-        local oldPos = model:GetAttribute("BT_Pos")
-        if not userId or not oldPos then return end
-
-        for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
-            if plr.UserId == userId then
-                return plr, oldPos
-            end
         end
-    end
-
-    -- Store the function so other parts of the script can use it
-    getBacktrackHit = tryHitGhost
-end
--- ===================== END BACKTRACK =====================
+    end));
 
     local aimTime;
 
@@ -5970,6 +5972,92 @@ end
         end
         aimTime = aimbotting and aimTime
 
+        -- Aim Assist: gentle magnetism that nudges camera toward nearest target
+        if wapus:GetValue("Aim Assist", "Enabled") and (not wapus:GetValue("Aim Assist", "Only While Aiming") or aiming) then
+            local aaFov = wapus:GetValue("Aim Assist", "FOV Radius")
+            local aaTarget, aaEntry, aaPart = getClosest(
+                camera.ViewportSize * 0.5,
+                aaFov,
+                nil,
+                wapus:GetValue("Aim Assist", "Visible Check"),
+                wapus:GetValue("Aim Assist", "Target Part")
+            )
+
+            if aaTarget and aaEntry then
+                local player = aaEntry._player
+                local cameraObj = cameraInterface.getActiveCamera()
+                local screenPos, onScreen = camera:WorldToViewportPoint(aaTarget)
+
+                if onScreen and screenPos.Z > 0 then
+                    local strength = wapus:GetValue("Aim Assist", "Strength") * 0.01
+                    local smoothing = wapus:GetValue("Aim Assist", "Smoothness")
+                    local vel = (movementCache.position[player] and movementCache.position[player][1] and movementCache.position[player][5]) and
+                        (movementCache.position[player][5] - movementCache.position[player][1]) / math.max(movementCache.time[1] - (movementCache.time[5] or movementCache.time[1] - 0.1), 0.01) or Vector3.zero
+                    local predictedTarget = aaTarget + vel * 0.08
+
+                    local velocity, _ = complexTrajectory(
+                        camera.CFrame * Vector3.new(0, 0, 0.5),
+                        publicSettings.bulletAcceleration,
+                        predictedTarget,
+                        weapon and weapon._weaponData and weapon._weaponData.bulletspeed or 10000,
+                        vel
+                    )
+
+                    if velocity then
+                        local vx, vy = toanglesyx(velocity)
+                        local cy = cameraObj._angles.y
+                        local x = math.clamp(vx, cameraObj._minAngle or -math.pi/2, cameraObj._maxAngle or math.pi/2)
+                        local y = (vy + pi - cy) % tau - pi + cy
+                        local aimAngles = Vector3.new(x, y, 0)
+                        local blended = cameraObj._angles:lerp(aimAngles, (1 - smoothing) * strength)
+                        cameraObj._delta = (blended - cameraObj._angles) / deltaTime
+                        cameraObj._angles = blended
+                    end
+                end
+            end
+        end
+
+        -- Watermark rendering
+        do
+            local wmEnabled = wapus:GetValue("Tweaks", "Watermark")
+            watermarkBg.Visible = wmEnabled == true
+            watermarkOutline.Visible = wmEnabled == true
+            watermarkText.Visible = wmEnabled == true
+
+            if wmEnabled then
+                local wmLabel = (wapus:GetValue("Tweaks", "Watermark Text") or defaultUIName)
+                local fps = math.floor(1 / (deltaTime + 0.0001))
+                local timeStr = string.format("%02d:%02d", math.floor(clockTime / 60) % 60, math.floor(clockTime) % 60)
+                local fullText = wmLabel .. "  |  " .. fps .. " fps  |  " .. timeStr
+
+                watermarkText.Text = fullText
+                watermarkText.Size = 14
+                watermarkText.Color = wapus.theme.text
+                watermarkText.Outline = true
+                watermarkText.OutlineColor = Color3.new(0, 0, 0)
+                watermarkText.Visible = true
+
+                local textBounds = watermarkText.TextBounds or Vector2.new(#fullText * 7.5, 14)
+                local padding = Vector2.new(10, 5)
+                local wmPos = Vector2.new(8, 8)
+                local wmSize = textBounds + padding * 2
+
+                watermarkOutline.Position = wmPos - Vector2.new(1, 1)
+                watermarkOutline.Size = wmSize + Vector2.new(2, 2)
+                watermarkOutline.Color = wapus.theme.outline
+                watermarkOutline.Filled = true
+                watermarkOutline.Visible = true
+
+                watermarkBg.Position = wmPos
+                watermarkBg.Size = wmSize
+                watermarkBg.Color = wapus.theme.background
+                watermarkBg.Filled = true
+                watermarkBg.Visible = true
+
+                watermarkText.Position = wmPos + padding - Vector2.new(0, 1)
+            end
+        end
+
         local circlePos
         if wapus:GetValue("FOV Settings", "FOV Follows Recoil") then
             local barrel = getBarrelLocation()
@@ -5984,6 +6072,18 @@ end
         aimbotdeadfov.Position = circlePos
         silentaimfov.Position = circlePos
         silentaimdeadfov.Position = circlePos
+        aimassistfov.Position = circlePos
+
+        -- Aim Assist FOV circle visibility
+        local aaShowFov = wapus:GetValue("Aim Assist", "Enabled") and wapus:GetValue("Aim Assist", "Show FOV")
+        aimassistfov.Visible = aaShowFov == true
+        if aaShowFov then
+            aimassistfov.Radius = wapus:GetValue("Aim Assist", "FOV Radius")
+            aimassistfov.Color = wapus:GetValue("Aim Assist", "FOV Color") or Color3.fromRGB(0, 220, 190)
+            aimassistfov.Thickness = 1
+            aimassistfov.Filled = false
+            aimassistfov.Transparency = 0.6
+        end
 
         if wapus:GetValue("FOV Settings", "Dynamic FOV") then
             local factor = not charInterface.isAlive() and 1 or (cameraInterface.getActiveCamera():getBaseFov() / camera.FieldOfView)
@@ -6023,12 +6123,9 @@ end
         thirdPersonObject.setCharacterRender = setCharacterRender
         charObject.setBaseWalkSpeed = setBaseWalkSpeed
         charObject.jump = jump
-        for _, ghost in pairs(backtrackGhosts) do
-    if ghost and ghost.Parent then ghost:Destroy() end
-        end
-        table.clear(backtrackGhosts)
-        table.clear(backtrackHistory)
 
+        backtrackObjects:Destroy()
+        hitboxObjects:Destroy()
     end
     -- now was that so bad?
 end)()
@@ -6154,15 +6251,18 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
         local userThemeData = httpService:JSONDecode(readfile(folderName .. "/theme.json"))
         title = (userThemeData.Title == "Wapus" and defaultUIName) or userThemeData.Title
         -- if the user theme still contains the old default purple accent, update it to blue
-        if userThemeData["Accent Color"] and userThemeData["Accent Color"][1] == 127 and userThemeData["Accent Color"][2] == 72 and userThemeData["Accent Color"][3] == 163 then
-            userThemeData["Accent Color"] = {84, 154, 255}
-            userThemeData["Background Color"] = {12, 22, 42}
-            userThemeData["Light Background Color"] = {24, 44, 76}
-            userThemeData["Hidden Color"] = {7, 14, 28}
-            userThemeData["Hidden Text Color"] = {210, 225, 255}
-            userThemeData["Outline Color"] = {40, 68, 112}
+        -- migrate old purple OR old blue accent to new neon teal palette
+        local acc = userThemeData["Accent Color"]
+        if acc and ((acc[1] == 127 and acc[2] == 72 and acc[3] == 163) or (acc[1] == 84 and acc[2] == 154 and acc[3] == 255)) then
+            userThemeData["Accent Color"] = {0, 220, 190}
+            userThemeData["Background Color"] = {14, 16, 22}
+            userThemeData["Light Background Color"] = {26, 30, 42}
+            userThemeData["Hidden Color"] = {8, 9, 14}
+            userThemeData["Hidden Text Color"] = {160, 185, 220}
+            userThemeData["Outline Color"] = {45, 55, 80}
             writefile(folderName .. "/theme.json", httpService:JSONEncode(userThemeData))
         end
+        -- end migration
 
         wapus.theme = {
             accent = Color3.fromRGB(table.unpack(userThemeData["Accent Color"])),
@@ -6176,13 +6276,13 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     else
         local themeData = {
             ["Title"] = defaultUIName,
-            ["Accent Color"] = {84, 154, 255},
-            ["Text Color"] = {255, 255, 255},
-            ["Background Color"] = {12, 22, 42},
-            ["Light Background Color"] = {24, 44, 76},
-            ["Hidden Color"] = {7, 14, 28},
-            ["Hidden Text Color"] = {210, 225, 255},
-            ["Outline Color"] = {40, 68, 112}
+            ["Accent Color"] = {0, 220, 190},
+            ["Text Color"] = {230, 240, 255},
+            ["Background Color"] = {14, 16, 22},
+            ["Light Background Color"] = {26, 30, 42},
+            ["Hidden Color"] = {8, 9, 14},
+            ["Hidden Text Color"] = {160, 185, 220},
+            ["Outline Color"] = {45, 55, 80}
         }
 
         writefile(folderName .. "/theme.json", httpService:JSONEncode(themeData))
@@ -6316,6 +6416,17 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     --fovsettings:AddSlider("Circle Side Number", 48, 3, 64, 1, "", getCallback("FOV Settings%%Circle Side Number"))
     fovsettings:AddSlider("Circle Opacity", 100, 1, 100, 1, "%", getCallback("FOV Settings%%Circle Opacity"))
     fovsettings:AddToggle("Fill Circles", false, getCallback("FOV Settings%%Fill Circles"))
+
+    -- Aim Assist section (mouse magnetism, lighter than full aimbot)
+    local aimassist = legit:CreateSection("Aim Assist", false, "half")
+    aimassist:AddToggle("Enabled", false, getCallback("Aim Assist%%Enabled")):AddKeyBind(nil, "Aim Assist Bind")
+    aimassist:AddToggle("Visible Check", false, getCallback("Aim Assist%%Visible Check"))
+    aimassist:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
+    aimassist:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
+    aimassist:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
+    aimassist:AddSlider("FOV Radius", 200, 10, 800, 5, " px", getCallback("Aim Assist%%FOV Radius"))
+    aimassist:AddToggle("Only While Aiming", true, getCallback("Aim Assist%%Only While Aiming"))
+    aimassist:AddToggle("Show FOV", false, getCallback("Aim Assist%%Show FOV")):AddColorPicker("FOV Color", Color3.fromRGB(0, 220, 190), getCallback("Aim Assist%%FOV Color"))
 
     silentaim:AddToggle("Enabled", false, getCallback("Silent Aim%%Enabled")):AddKeyBind(nil, "Key Bind")
     silentaim:AddToggle("Visible Check", false, getCallback("Silent Aim%%Visible Check"))
@@ -6517,6 +6628,8 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     sounds:AddDropdown("Glass Breaking Sound", "None", soundFileList, getCallback("Sounds%%Glass Breaking Sound"))
     sounds:AddDropdown("Footstep Sound", "None", soundFileList, getCallback("Sounds%%Footstep Sound"))
 
+    tweaks:AddToggle("Watermark", false, getCallback("Tweaks%%Watermark"))
+    tweaks:AddTextBox("Watermark Text", defaultUIName, getCallback("Tweaks%%Watermark Text"))
     tweaks:AddToggle("Custom Kill Notification", false, getCallback("Tweaks%%Custom Kill Notification"))
     tweaks:AddTextBox("Notification Text", "Chud Gone!", getCallback("Tweaks%%Notification Text"))
     tweaks:AddButton("Unlock All Attachments", getCallback("Tweaks%%Unlock All Attachments"))
@@ -6584,6 +6697,22 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     configuration:AddButton("Update Config List", getCallback("Configuration%%Update Config List"))
     configuration:AddTextBox("Config Name", "New Config", getCallback("Configuration%%Config Name"))
     configuration:AddButton("Save Config", getCallback("Configuration%%Save Config"))
+
+    -- Aim Assist callbacks (no extra logic needed; values read live in RenderStepped)
+    callbackList["Aim Assist%%Enabled"] = function(state)
+        if not state then
+            aimassistfov.Visible = false
+        end
+    end
+
+    -- Watermark callbacks
+    callbackList["Tweaks%%Watermark"] = function(state)
+        if not state then
+            watermarkBg.Visible = false
+            watermarkOutline.Visible = false
+            watermarkText.Visible = false
+        end
+    end
 
     callbackList["Cheat Settings%%Show Keybind List"] = function(bool)
         if bool then
