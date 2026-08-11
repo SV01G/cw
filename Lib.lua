@@ -4527,9 +4527,14 @@ LPH_JIT_MAX(function() -- Main Cheat
     aimassistfov.Filled = false
     aimassistfov.Visible = false
 
-    callbackList["Aim Assist%%Show FOV"] = function(state)
-        aimassistfov.Visible = state
+    -- "Show FOV Circle" is what the UI toggle is named;
+    -- keep both keys pointing at the same function so
+    -- the keybind path also works.
+    local function aaFovVisible(state)
+        aimassistfov.Visible = state == true
     end
+    callbackList["Aim Assist%%Show FOV Circle"] = aaFovVisible
+    callbackList["Aim Assist%%Show FOV"]        = aaFovVisible   -- legacy / keybind path
 
     callbackList["Aim Assist%%FOV Color"] = function(state)
         aimassistfov.Color = state
@@ -4565,6 +4570,7 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     -- Watermark: initialize drawing objects once here; RenderStepped only toggles Visible + updates text
+    local wmLastClock = 0   -- shared between the do-block and RenderStepped
     do
         local wmLocalName = game:GetService("Players").LocalPlayer.Name
         local wmPad = 8
@@ -4588,56 +4594,61 @@ LPH_JIT_MAX(function() -- Main Cheat
         wmUser.ZIndex = 4
         wmUser.Visible = false
 
-		local function updateWatermarkLayout()
-		    local text = string.format("%s  %s  |  %s", defaultUIName, wmLocalName, "2.3")
-		    -- or with time: string.format("%s  %s  |  %s", defaultUIName, wmLocalName, os.date("%H:%M"))
-		
-		    wmTitle.Text = text
-		    wmTitle.Size = 13
-		    wmTitle.Color = Color3.fromRGB(220, 220, 220)
-		    wmTitle.Outline = true
-		    wmTitle.OutlineColor = Color3.new(0, 0, 0)
-		    wmTitle.Visible = true
-		
-		    wmUser.Visible = false
-		    wmSep.Visible = false
-		
-		    -- wait for bounds if needed
-		    local textW = wmTitle.TextBounds.X
-		    if textW < 20 then
-		        textW = #text * 6.5
-		    end
-		
-		    local padX = 8
-		    local h = 20
-		    local accentW = 3
-		    local totalW = accentW + padX + textW + padX
-		    local x, y = 8, 40
-		
-		    -- outline (slightly larger dark edge)
-		    wmOutline.Filled = true
-		    wmOutline.Color = Color3.fromRGB(30, 30, 30)
-		    wmOutline.Position = Vector2.new(x - 1, y - 1)
-		    wmOutline.Size = Vector2.new(totalW + 2, h + 2)
-		    wmOutline.Visible = true
-		
-		    -- main background
-		    wmBg.Filled = true
-		    wmBg.Color = Color3.fromRGB(18, 18, 18)
-		    wmBg.Position = Vector2.new(x, y)
-		    wmBg.Size = Vector2.new(totalW, h)
-		    wmBg.Visible = true
-		
-		    -- left accent strip
-		    wmAccent.Filled = true
-		    wmAccent.Color = Color3.fromRGB(0, 200, 170) -- or your theme accent
-		    wmAccent.Position = Vector2.new(x, y)
-		    wmAccent.Size = Vector2.new(accentW, h)
-		    wmAccent.Visible = true
-		
-		    -- text
-		    wmTitle.Position = Vector2.new(x + accentW + padX, y + 3)
-		end
+        local function updateWatermarkLayout()
+            -- gamesense-style: "CheatName  PlayerName  |  HH:MM"
+            local timeStr = os.date("%H:%M")
+            local text = string.format("%s  %s  |  %s", defaultUIName, wmLocalName, timeStr)
+
+            wmTitle.Text = text
+            wmTitle.Size = 13
+            wmTitle.Color = Color3.fromRGB(220, 225, 235)
+            wmTitle.Outline = true
+            wmTitle.OutlineColor = Color3.new(0, 0, 0)
+            wmTitle.Visible = true
+
+            wmUser.Visible = false
+            wmSep.Visible = false
+
+            -- measure text width; fall back to char estimate if TextBounds not ready
+            local textW = wmTitle.TextBounds.X
+            if textW < 20 then
+                textW = #text * 6.8
+            end
+
+            local padX   = 10   -- horizontal padding each side
+            local h      = 22   -- bar height (gamesense is a bit taller than 20)
+            local accentW = 3   -- left teal strip
+            local totalW  = accentW + padX + textW + padX
+            local x, y   = 8, 44  -- moved down 4 px (was 40)
+
+            -- thin dark border (1 px each side)
+            wmOutline.Filled   = true
+            wmOutline.Color    = Color3.fromRGB(8, 8, 8)
+            wmOutline.Position = Vector2.new(x - 1, y - 1)
+            wmOutline.Size     = Vector2.new(totalW + 2, h + 2)
+            wmOutline.ZIndex   = 2
+            wmOutline.Visible  = true
+
+            -- main background — very dark, near-black like gamesense
+            wmBg.Filled   = true
+            wmBg.Color    = Color3.fromRGB(14, 14, 18)
+            wmBg.Position = Vector2.new(x, y)
+            wmBg.Size     = Vector2.new(totalW, h)
+            wmBg.ZIndex   = 3
+            wmBg.Visible  = true
+
+            -- left accent strip (teal, matches menu theme)
+            wmAccent.Filled   = true
+            wmAccent.Color    = Color3.fromRGB(0, 200, 170)
+            wmAccent.Position = Vector2.new(x, y)
+            wmAccent.Size     = Vector2.new(accentW, h)
+            wmAccent.ZIndex   = 4
+            wmAccent.Visible  = true
+
+            -- text sits right of the accent strip, vertically centred
+            wmTitle.ZIndex   = 5
+            wmTitle.Position = Vector2.new(x + accentW + padX, y + math.floor((h - 13) * 0.5) - 1)
+        end
 
         -- run layout after one frame so TextBounds are valid
         task.defer(updateWatermarkLayout)
@@ -5941,54 +5952,41 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                     if not entry._isEnemy then return end
  
                     local thirdPerson = entry._thirdPersonObject
-                    -- _character is the Model with all animated BaseParts
-                    local character  = thirdPerson and thirdPerson._character
- 
-                    -- We need at least one BasePart to be useful
+                    -- _characterModelHash is the {partName = BasePart} table used by PF's replication.
+                    -- _character is the animated Model which may be nil when the player isn't rendered.
+                    local charHash = thirdPerson and thirdPerson._characterModelHash
+
+                    -- We need at least one BasePart to snapshot
+                    if not charHash then return end
                     local hasBase = false
-                    if character then
-                        for _, d in ipairs(character:GetDescendants()) do
-                            if d:IsA("BasePart") then hasBase = true; break end
+                    for _, part in pairs(charHash) do
+                        if typeof(part) == "Instance" and part:IsA("BasePart") then
+                            hasBase = true; break
                         end
                     end
- 
                     if not hasBase then return end
- 
-                    -- ── Snapshot: clone and freeze every part at its CURRENT world CFrame ──
-                    local clone = character:Clone()
- 
-                    -- Remove anything that isn't a BasePart (Scripts, Motors, etc.)
-                    -- so the clone is purely visual and doesn't run any logic.
-                    for _, d in ipairs(clone:GetDescendants()) do
-                        if not d:IsA("BasePart") and not d:IsA("Model") then
-                            d:Destroy()
+
+                    -- ── Snapshot: build a ghost folder of frozen BaseParts ──
+                    -- We don't clone the animated Model (which may be unparented/nil).
+                    -- Instead we snapshot directly from the hash, which is always valid.
+                    local ghost = Instance.new("Model")
+                    ghost.Name = player.Name
+
+                    for partName, src in pairs(charHash) do
+                        if typeof(src) == "Instance" and src:IsA("BasePart") then
+                            local copy = Instance.new("Part")
+                            copy.Name        = partName
+                            copy.Size        = src.Size
+                            copy.CFrame      = src.CFrame
+                            copy.Anchored    = true
+                            copy.CanCollide  = false
+                            copy.CastShadow  = false
+                            copy.Transparency = 1  -- cham lib will override
+                            copy.Parent = ghost
                         end
                     end
- 
-                    -- Freeze every part at its live world CFrame
-                    -- We read CFrames from the ORIGINAL before cloning positions diverge.
-                    local worldCFrames = {}
-                    for _, src in ipairs(character:GetDescendants()) do
-                        if src:IsA("BasePart") then
-                            worldCFrames[src.Name] = src.CFrame
-                        end
-                    end
- 
-                    for _, dst in ipairs(clone:GetDescendants()) do
-                        if dst:IsA("BasePart") then
-                            dst.Anchored   = true
-                            dst.CanCollide = false
-                            dst.CastShadow = false
-                            -- Joints / motors no longer work on anchored parts, so
-                            -- lock each part at the world CFrame it had when alive.
-                            if worldCFrames[dst.Name] then
-                                dst.CFrame = worldCFrames[dst.Name]
-                            end
-                        end
-                    end
- 
-                    clone.Name = player.Name
-                    clone.Parent = backtrackObjects
+
+                    ghost.Parent = backtrackObjects
  
                     -- Apply cham properties via the existing cham library
                     local chamProps = {
@@ -5997,22 +5995,22 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                         Color       = wapus:GetValue("Backtracking", "Character Color"),
                         CanCollide  = false,
                     }
-                    local _, uncache = cham.new(clone, chamProps, false, true, false)
- 
+                    local _, uncache = cham.new(ghost, chamProps, false, true, false)
+
                     -- Fade out then destroy
                     local duration = wapus:GetValue("Backtracking", "Character Duration")
                     task.delay(duration, function()
-                        local steps       = 5
-                        local startTrans  = chamProps.Transparency
-                        local step        = (1 - startTrans) / steps
- 
+                        local steps      = 5
+                        local startTrans = chamProps.Transparency
+                        local fadeStep   = (1 - startTrans) / steps
+
                         for _ = 1, steps do
-                            chamProps.Transparency = chamProps.Transparency + step
+                            chamProps.Transparency = chamProps.Transparency + fadeStep
                             task.wait(0.05)
                         end
- 
+
                         if uncache then uncache() end
-                        if clone and clone.Parent then clone:Destroy() end
+                        if ghost and ghost.Parent then ghost:Destroy() end
                     end)
                 end)
  
@@ -6147,6 +6145,12 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                 cross3.Color = rainbow
                 cross4.Color = rainbow
             end
+        end
+
+        -- Watermark live clock: update at most once per second
+        if wapus:GetValue("Cheat Settings", "Show Watermark") and (clockTime - wmLastClock) >= 1 then
+            wmLastClock = clockTime
+            updateWatermarkLayout()
         end
     end)))
 
@@ -6374,16 +6378,28 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     local function getCallback(name)
         return function(value)
             if value ~= nil then
-                local oldConfig = httpService:JSONDecode(readfile(folderName .. "/cache/lastfile.json"))
-                local keybinds = {}
-                oldConfig[name] = value
+                local ok, raw = pcall(readfile, folderName .. "/cache/lastfile.json")
+                local oldConfig = (ok and pcall(httpService.JSONDecode, httpService, raw)) and httpService:JSONDecode(raw) or {}
 
-                for _, keybind in menu.keybinds do
-                    local keyName, data = table.unpack(keybind)
-                    table.insert(keybinds, {data.toggle.section.name .. "%%" .. data.toggle.name, keyName})
+                -- Serialise Color3 → plain table so JSONEncode works
+                local serialised = value
+                if typeof(value) == "Color3" then
+                    serialised = { value.R, value.G, value.B }
                 end
 
+                oldConfig[name] = serialised
+
+                -- Preserve keybinds
+                local keybinds = {}
+                for _, keybind in menu.keybinds do
+                    local keyName, data = table.unpack(keybind)
+                    table.insert(keybinds, {
+                        data.toggle.section.name .. "%%" .. data.toggle.name,
+                        keyName
+                    })
+                end
                 oldConfig["Keybinds"] = keybinds
+
                 saveConfig(folderName .. "/cache/lastfile.json", oldConfig)
             end
 
@@ -6459,7 +6475,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     aimassist:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
     aimassist:AddToggle("Use FOV", false, getCallback("Aim Assist%%Use FOV"))
     aimassist:AddSlider("FOV Radius", 200, 2, 800, 1, "px", getCallback("Aim Assist%%FOV Radius"))
-    aimassist:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
+    aimassist:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV Circle")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
 
     silentaim:AddToggle("Enabled", false, getCallback("Silent Aim%%Enabled")):AddKeyBind(nil, "Key Bind")
     silentaim:AddToggle("Visible Check", false, getCallback("Silent Aim%%Visible Check"))
