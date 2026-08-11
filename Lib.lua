@@ -4589,43 +4589,54 @@ LPH_JIT_MAX(function() -- Main Cheat
         wmUser.Visible = false
 
 		local function updateWatermarkLayout()
-		    -- single-line text
-		    local text = string.format("%s  |  %s  |  %s", defaultUIName, wmLocalName, os.date("%H:%M"))
+		    local text = string.format("%s  %s  |  %s", defaultUIName, wmLocalName, "2.3")
+		    -- or with time: string.format("%s  %s  |  %s", defaultUIName, wmLocalName, os.date("%H:%M"))
+		
 		    wmTitle.Text = text
 		    wmTitle.Size = 13
-		    wmTitle.Color = Color3.fromRGB(225, 235, 255)
+		    wmTitle.Color = Color3.fromRGB(220, 220, 220)
 		    wmTitle.Outline = true
 		    wmTitle.OutlineColor = Color3.new(0, 0, 0)
+		    wmTitle.Visible = true
 		
-		    -- hide stacked second line
 		    wmUser.Visible = false
 		    wmSep.Visible = false
 		
-		    local titleW = wmTitle.TextBounds.X
-		    if titleW < 10 then
-		        titleW = #text * 7 -- fallback before TextBounds is ready
+		    -- wait for bounds if needed
+		    local textW = wmTitle.TextBounds.X
+		    if textW < 20 then
+		        textW = #text * 6.5
 		    end
 		
-		    local innerH = 18
-		    local totalW = wmAccW + titleW + wmPad * 2
-		    local wmX, wmY = 8, 40   -- under Roblox top bar
+		    local padX = 8
+		    local h = 20
+		    local accentW = 3
+		    local totalW = accentW + padX + textW + padX
+		    local x, y = 8, 40
 		
-		    wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
-		    wmOutline.Size = Vector2.new(totalW + 2, innerH + 2)
-		    wmOutline.Color = Color3.fromRGB(40, 48, 70)
+		    -- outline (slightly larger dark edge)
 		    wmOutline.Filled = true
+		    wmOutline.Color = Color3.fromRGB(30, 30, 30)
+		    wmOutline.Position = Vector2.new(x - 1, y - 1)
+		    wmOutline.Size = Vector2.new(totalW + 2, h + 2)
+		    wmOutline.Visible = true
 		
-		    wmBg.Position = Vector2.new(wmX, wmY)
-		    wmBg.Size = Vector2.new(totalW, innerH)
-		    wmBg.Color = Color3.fromRGB(13, 15, 21)
+		    -- main background
 		    wmBg.Filled = true
+		    wmBg.Color = Color3.fromRGB(18, 18, 18)
+		    wmBg.Position = Vector2.new(x, y)
+		    wmBg.Size = Vector2.new(totalW, h)
+		    wmBg.Visible = true
 		
-		    wmAccent.Position = Vector2.new(wmX, wmY)
-		    wmAccent.Size = Vector2.new(wmAccW, innerH)
-		    wmAccent.Color = Color3.fromRGB(0, 200, 170)
+		    -- left accent strip
 		    wmAccent.Filled = true
+		    wmAccent.Color = Color3.fromRGB(0, 200, 170) -- or your theme accent
+		    wmAccent.Position = Vector2.new(x, y)
+		    wmAccent.Size = Vector2.new(accentW, h)
+		    wmAccent.Visible = true
 		
-		    wmTitle.Position = Vector2.new(wmX + wmAccW + wmPad, wmY + 2)
+		    -- text
+		    wmTitle.Position = Vector2.new(x + accentW + padX, y + 3)
 		end
 
         -- run layout after one frame so TextBounds are valid
