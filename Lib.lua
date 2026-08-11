@@ -5328,29 +5328,28 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     callbackList["Enemy ESP%%Highlight Chams"] = function(state)
-        espInterface.teamSettings.enemy.chams = state
-    end
+	    espInterface.teamSettings.enemy.chams = state
+	end
 
-    callbackList["Enemy ESP%%Highlight Outline Color"] = function(state)
-        espInterface.teamSettings.enemy.chamsOutlineColor[1] = state
-    end
+callbackList["Enemy ESP%%Highlight Outline Color"] = function(state)
+	    espInterface.teamSettings.enemy.chamsOutlineColor[1] = state
+	end
 
-    callbackList["Enemy ESP%%Highlight Outline Opacity"] = function(state)
-        espInterface.teamSettings.enemy.chamsOutlineColor[2] = state * 0.01
-    end
+callbackList["Enemy ESP%%Highlight Outline Opacity"] = function(state)
+	    espInterface.teamSettings.enemy.chamsOutlineColor[2] = state * 0.01
+	end
 
-    callbackList["Enemy ESP%%Highlight Fill Color"] = function(state)
-        espInterface.teamSettings.enemy.chamsOutlineColor[1] = state
-    end
+callbackList["Enemy ESP%%Highlight Fill Color"] = function(state)
+	    espInterface.teamSettings.enemy.chamsFillColor[1] = state   -- was chamsOutlineColor (bug)
+	end
 
-    callbackList["Enemy ESP%%Highlight Fill Opacity"] = function(state)
-        espInterface.teamSettings.enemy.chamsOutlineColor[2] = state * 0.01
-    end
+callbackList["Enemy ESP%%Highlight Fill Opacity"] = function(state)
+	    espInterface.teamSettings.enemy.chamsFillColor[2] = state * 0.01   -- was chamsOutlineColor (bug)
+	end
 
-    callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
-        espInterface.teamSettings.enemy.chamsVisibleOnly = state
-    end
-
+callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
+	    espInterface.teamSettings.enemy.chamsVisibleOnly = state
+	end
 
 
 
@@ -6414,7 +6413,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     local misc = menu:CreateTab("Misc")
     local settings = menu:CreateTab("Settings")
 
-    local aimbot = legit:CreateSection("Aim Bot", false, "whole")
+    local aimbot = legit:CreateSection("Aim Bot", false, "half")
     local fovsettings = aimbot:AddSection("FOV Settings")
     local aimassist = aimbot:AddSection("Aim Assist")
     local silentaim = legit:CreateSection("Silent Aim", true, "half")
