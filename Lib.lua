@@ -1637,23 +1637,6 @@ do -- UI Library
         insert(self.mainSections, section)
         return section
     end
-	local visibleChams = {
-enabled = false,
-fill = Color3.fromRGB(0, 255, 0),
-outline = Color3.fromRGB(0, 0, 0),
-}
-
-callbackList["Enemy ESP%%Use Visible Colors"] = function(state)
-visibleChams.enabled = state
-end
-
-callbackList["Enemy ESP%%Visible Fill Color"] = function(state)
-visibleChams.fill = state
-end
-
-callbackList["Enemy ESP%%Visible Outline Color"] = function(state)
-visibleChams.outline = state
-end
 
     local players = game:GetService("Players")
     local localplayer = players.LocalPlayer
@@ -5368,11 +5351,6 @@ callbackList["Enemy ESP%%Highlight Fill Opacity"] = function(state)
 	    espInterface.teamSettings.enemy.chamsFillColor[2] = state * 0.01   -- was chamsOutlineColor (bug)
 	end
 
-callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
-	    espInterface.teamSettings.enemy.chamsVisibleOnly = state
-	end
-
-
 
 
     callbackList["Team ESP%%Enabled"] = function(state) -- why doesnt this workkk nigga
@@ -6593,10 +6571,6 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Highlight Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Highlight Outline Color")):AddColorPicker("Highlight Fill Color", Color3.fromRGB(0,0,255), getCallback("Enemy ESP%%Highlight Fill Color"))
     enemyesp:AddSlider("Highlight Fill Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Fill Opacity"))
     enemyesp:AddSlider("Highlight Outline Transparency", 0, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Outline Opacity"))
-	enemyesp:AddToggle("Highlight Visible Check", false, getCallback("Enemy ESP%%Highlight Visible Check"))
-	enemyesp:AddToggle("Use Visible Colors", false, getCallback("Enemy ESP%%Use Visible Colors"))
-	enemyesp:AddColorPicker("Visible Fill Color", Color3.fromRGB(0, 255, 0), getCallback("Enemy ESP%%Visible Fill Color"))
-	enemyesp:AddColorPicker("Visible Outline Color", Color3.fromRGB(0, 0, 0), getCallback("Enemy ESP%%Visible Outline Color"))
 
     teamesp:AddToggle("Enabled", true, getCallback("Team ESP%%Enabled")):AddKeyBind(nil, "Key Bind")
     teamesp:AddToggle("Boxes", false, getCallback("Team ESP%%Boxes")):AddColorPicker("Box Color", Color3.fromRGB(0,255,255), getCallback("Team ESP%%Box Color"))
