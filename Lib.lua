@@ -4520,11 +4520,31 @@ LPH_JIT_MAX(function() -- Main Cheat
         silentaimdeadfov.Radius = state
     end
 
+    -- Aim Assist FOV circle init (same pattern as aimbot/silentaim)
+    aimassistfov.Color = Color3.new(1, 1, 1)
+    aimassistfov.Radius = 200
+    aimassistfov.NumSides = 48
+    aimassistfov.Filled = false
+    aimassistfov.Visible = false
+
+    callbackList["Aim Assist%%Show FOV"] = function(state)
+        aimassistfov.Visible = state
+    end
+
+    callbackList["Aim Assist%%FOV Color"] = function(state)
+        aimassistfov.Color = state
+    end
+
+    callbackList["Aim Assist%%FOV Radius"] = function(state)
+        aimassistfov.Radius = state
+    end
+
     callbackList["FOV Settings%%Circle Side Number"] = function(state)
         aimbotfov.NumSides = state
         aimbotdeadfov.NumSides = state
         silentaimfov.NumSides = state
         silentaimdeadfov.NumSides = state
+        aimassistfov.NumSides = state
     end
 
     callbackList["FOV Settings%%Circle Opacity"] = function(state)
@@ -4533,6 +4553,7 @@ LPH_JIT_MAX(function() -- Main Cheat
         aimbotdeadfov.Transparency = state
         silentaimfov.Transparency = state
         silentaimdeadfov.Transparency = state
+        aimassistfov.Transparency = state
     end
 
     callbackList["FOV Settings%%Fill Circles"] = function(state)
@@ -4540,6 +4561,78 @@ LPH_JIT_MAX(function() -- Main Cheat
         aimbotdeadfov.Filled = state
         silentaimfov.Filled = state
         silentaimdeadfov.Filled = state
+        aimassistfov.Filled = state
+    end
+
+    -- Watermark: initialize drawing objects once here; RenderStepped only toggles Visible + updates text
+    do
+        local wmLocalName = game:GetService("Players").LocalPlayer.Name
+        local wmPad = 8
+        local wmAccW = 3
+        local wmGap = 3
+
+        -- measure rough text widths using placeholder then fix after first frame
+        wmTitle.Text = defaultUIName
+        wmTitle.Size = 14
+        wmTitle.Color = Color3.fromRGB(225, 235, 255)
+        wmTitle.Outline = true
+        wmTitle.OutlineColor = Color3.new(0, 0, 0)
+        wmTitle.ZIndex = 4
+        wmTitle.Visible = false
+
+        wmUser.Text = wmLocalName
+        wmUser.Size = 13
+        wmUser.Color = Color3.fromRGB(0, 200, 170)
+        wmUser.Outline = true
+        wmUser.OutlineColor = Color3.new(0, 0, 0)
+        wmUser.ZIndex = 4
+        wmUser.Visible = false
+
+        local function updateWatermarkLayout()
+            local titleW = wmTitle.TextBounds.X
+            local userW  = wmUser.TextBounds.X
+            local innerW = math.max(titleW, userW) + wmPad * 2
+            local innerH = 14 + wmGap + 13 + wmPad * 2
+            local totalW = wmAccW + innerW
+
+            local wmX, wmY = 8, 8
+
+            wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
+            wmOutline.Size     = Vector2.new(totalW + 2, innerH + 2)
+            wmOutline.Color    = Color3.fromRGB(40, 48, 70)
+            wmOutline.Filled   = true
+
+            wmBg.Position = Vector2.new(wmX, wmY)
+            wmBg.Size     = Vector2.new(totalW, innerH)
+            wmBg.Color    = Color3.fromRGB(13, 15, 21)
+            wmBg.Filled   = true
+
+            wmAccent.Position = Vector2.new(wmX, wmY)
+            wmAccent.Size     = Vector2.new(wmAccW, innerH)
+            wmAccent.Color    = Color3.fromRGB(0, 200, 170)
+            wmAccent.Filled   = true
+
+            wmSep.Position = Vector2.new(wmX + wmAccW, wmY + wmPad + 14 + math.floor(wmGap * 0.5))
+            wmSep.Size     = Vector2.new(innerW, 1)
+            wmSep.Color    = Color3.fromRGB(40, 48, 70)
+            wmSep.Filled   = true
+
+            wmTitle.Position = Vector2.new(wmX + wmAccW + wmPad, wmY + wmPad - 1)
+            wmUser.Position  = Vector2.new(wmX + wmAccW + wmPad, wmY + wmPad + 14 + wmGap)
+        end
+
+        -- run layout after one frame so TextBounds are valid
+        task.defer(updateWatermarkLayout)
+
+        callbackList["Tweaks%%Watermark"] = function(state)
+            local on = state == true
+            wmOutline.Visible = on
+            wmBg.Visible      = on
+            wmAccent.Visible  = on
+            wmSep.Visible     = on
+            wmTitle.Visible   = on
+            wmUser.Visible    = on
+        end
     end
 
     callbackList["Hit Boxes%%Enabled"] = function(state)
@@ -5978,130 +6071,45 @@ LPH_JIT_MAX(function() -- Main Cheat
         end
         aimTime = aimbotting and aimTime
 
-        -- Aim Assist: soft magnetism toward nearest enemy, independent of full aimbot
+        -- Aim Assist: screen-space magnetism
         if wapus:GetValue("Aim Assist", "Enabled") and (not wapus:GetValue("Aim Assist", "Only While Aiming") or aiming) then
-            local aaRadius = wapus:GetValue("Aim Assist", "FOV Radius")
+            local useFov = wapus:GetValue("Aim Assist", "Use FOV")
+            local aaRadius = useFov and aimassistfov.Radius or math.huge
             local aaTarget, aaEntry = getClosest(
-                camera.ViewportSize * 0.5,
-                aaRadius,
+                aimassistfov.Position,
+                useFov and aaRadius or nil,
                 nil,
                 wapus:GetValue("Aim Assist", "Visible Check"),
                 wapus:GetValue("Aim Assist", "Target Part")
             )
 
             if aaTarget and aaEntry and not aimbotting then
-                local aaPlayer = aaEntry._player
                 local cameraObj = cameraInterface.getActiveCamera()
-                local aaStrength = wapus:GetValue("Aim Assist", "Strength") * 0.01
+                local aaStrength  = wapus:GetValue("Aim Assist", "Strength") * 0.01
                 local aaSmoothness = wapus:GetValue("Aim Assist", "Smoothness")
 
-                -- velocity prediction using movement cache
-                local aaVel = Vector3.zero
-                local mp = movementCache.position[aaPlayer]
-                local mt = movementCache.time
-                if mp and mp[5] and mp[1] and mt[5] and mt[1] and (mt[1] - mt[5]) ~= 0 then
-                    aaVel = (mp[1] - mp[5]) / (mt[1] - mt[5])
+                -- convert target world pos to screen, get direction toward it from screen center
+                local screenPos = camera:WorldToViewportPoint(aaTarget)
+                local center = camera.ViewportSize * 0.5
+                local screenDelta = Vector2.new(screenPos.X, screenPos.Y) - center
+
+                if screenPos.Z > 0 and screenDelta.Magnitude > 0 then
+                    -- convert screen delta to angle delta — small nudge only
+                    local fovY = math.rad(camera.FieldOfView)
+                    local fovX = fovY * (camera.ViewportSize.X / camera.ViewportSize.Y)
+                    local angleNudgeX = -(screenDelta.Y / camera.ViewportSize.Y) * fovY * aaStrength
+                    local angleNudgeY = -(screenDelta.X / camera.ViewportSize.X) * fovX * aaStrength
+
+                    local current = cameraObj._angles
+                    local nudged = Vector3.new(
+                        math.clamp(current.X + angleNudgeX, cameraObj._minAngle or -math.pi*0.5, cameraObj._maxAngle or math.pi*0.5),
+                        current.Y + angleNudgeY,
+                        0
+                    )
+                    local smoothed = current:lerp(nudged, 1 - aaSmoothness)
+                    cameraObj._delta = (smoothed - current) / deltaTime
+                    cameraObj._angles = smoothed
                 end
-
-                local predictedTarget = aaTarget + aaVel * 0.06
-                local aaVelocity = complexTrajectory(
-                    camera.CFrame * Vector3.new(0, 0, 0.5),
-                    publicSettings.bulletAcceleration,
-                    predictedTarget,
-                    weapon and weapon._weaponData and weapon._weaponData.bulletspeed or 10000,
-                    aaVel
-                )
-
-                if aaVelocity then
-                    local vx, vy = toanglesyx(aaVelocity)
-                    local cameraObj2 = cameraInterface.getActiveCamera()
-                    local cy = cameraObj2._angles.y
-                    local targetX = math.clamp(vx, cameraObj2._minAngle or -math.pi*0.5, cameraObj2._maxAngle or math.pi*0.5)
-                    local targetY = (vy + pi - cy) % tau - pi + cy
-                    local targetAngles = Vector3.new(targetX, targetY, 0)
-                    local lerpFactor = math.clamp((1 - aaSmoothness) * aaStrength, 0, 1)
-                    local newAngles = cameraObj2._angles:lerp(targetAngles, lerpFactor)
-                    cameraObj2._delta = (newAngles - cameraObj2._angles) / deltaTime
-                    cameraObj2._angles = newAngles
-                end
-            end
-        end
-
-        -- Watermark: styled like the UI — outline + dark bg + teal accent bar + text
-        do
-            local wmOn = wapus:GetValue("Tweaks", "Watermark") == true
-            if wmOn then
-                local cheatName = defaultUIName
-                local userName2 = game:GetService("Players").LocalPlayer.Name
-                local padding = 8
-                local accentW = 3
-                local textGap = 2
-
-                wmTitle.Text = cheatName
-                wmTitle.Size = 14
-                wmTitle.Color = wapus.theme.text
-                wmTitle.Outline = true
-                wmTitle.OutlineColor = Color3.new(0, 0, 0)
-                wmTitle.Visible = true
-
-                wmUser.Text = userName2
-                wmUser.Size = 13
-                wmUser.Color = wapus.theme.accent
-                wmUser.Outline = true
-                wmUser.OutlineColor = Color3.new(0, 0, 0)
-                wmUser.Visible = true
-
-                local titleW = wmTitle.TextBounds.X
-                local userW  = wmUser.TextBounds.X
-                local innerW = math.max(titleW, userW) + padding * 2
-                local innerH = 14 + textGap + 13 + padding * 2  -- title + gap + username + top/bot pad
-                local totalW = accentW + innerW
-                local totalH = innerH
-
-                local wmX = 8
-                local wmY = 8
-
-                -- outline (1px border)
-                wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
-                wmOutline.Size     = Vector2.new(totalW + 2, totalH + 2)
-                wmOutline.Color    = wapus.theme.outline
-                wmOutline.Filled   = true
-                wmOutline.Visible  = true
-
-                -- dark background
-                wmBg.Position = Vector2.new(wmX, wmY)
-                wmBg.Size     = Vector2.new(totalW, totalH)
-                wmBg.Color    = wapus.theme.background
-                wmBg.Filled   = true
-                wmBg.Visible  = true
-
-                -- teal left-edge accent bar
-                wmAccent.Position = Vector2.new(wmX, wmY)
-                wmAccent.Size     = Vector2.new(accentW, totalH)
-                wmAccent.Color    = wapus.theme.accent
-                wmAccent.Filled   = true
-                wmAccent.Visible  = true
-
-                local textX = wmX + accentW + padding
-                -- cheat name (top line)
-                wmTitle.Position = Vector2.new(textX, wmY + padding - 1)
-
-                -- username (bottom line)
-                wmUser.Position = Vector2.new(textX, wmY + padding + 14 + textGap)
-
-                -- thin separator between the two text lines
-                wmSep.Position = Vector2.new(wmX + accentW, wmY + padding + 14 + math.floor(textGap * 0.5))
-                wmSep.Size     = Vector2.new(innerW, 1)
-                wmSep.Color    = wapus.theme.outline
-                wmSep.Filled   = true
-                wmSep.Visible  = true
-            else
-                wmOutline.Visible = false
-                wmBg.Visible      = false
-                wmAccent.Visible  = false
-                wmTitle.Visible   = false
-                wmUser.Visible    = false
-                wmSep.Visible     = false
             end
         end
 
@@ -6121,23 +6129,13 @@ LPH_JIT_MAX(function() -- Main Cheat
         silentaimdeadfov.Position = circlePos
         aimassistfov.Position = circlePos
 
-        -- Aim Assist FOV circle
-        local aaShowFov = wapus:GetValue("Aim Assist", "Enabled") and wapus:GetValue("Aim Assist", "Show FOV")
-        aimassistfov.Visible = aaShowFov == true
-        if aaShowFov then
-            aimassistfov.Radius = wapus:GetValue("Aim Assist", "FOV Radius")
-            aimassistfov.Color = wapus:GetValue("Aim Assist", "FOV Color") or Color3.fromRGB(0, 200, 170)
-            aimassistfov.Thickness = 1
-            aimassistfov.Filled = false
-            aimassistfov.Transparency = 0.55
-        end
-
         if wapus:GetValue("FOV Settings", "Dynamic FOV") then
             local factor = not charInterface.isAlive() and 1 or (cameraInterface.getActiveCamera():getBaseFov() / camera.FieldOfView)
             aimbotfov.Radius = wapus:GetValue("Aim Bot", "FOV Radius") * factor
             aimbotdeadfov.Radius = wapus:GetValue("Aim Bot", "Dead FOV Radius") * factor
             silentaimfov.Radius = wapus:GetValue("Silent Aim", "FOV Radius") * factor
             silentaimdeadfov.Radius = wapus:GetValue("Silent Aim", "Dead FOV Radius") * factor
+            aimassistfov.Radius = wapus:GetValue("Aim Assist", "FOV Radius") * factor
         end
 
         if wapus:GetValue("World Visuals", "Ambient") then
@@ -6469,8 +6467,9 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     aimassistsec:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
     aimassistsec:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
     aimassistsec:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
-    aimassistsec:AddSlider("FOV Radius", 200, 10, 800, 5, " px", getCallback("Aim Assist%%FOV Radius"))
-    aimassistsec:AddToggle("Show FOV", false, getCallback("Aim Assist%%Show FOV")):AddColorPicker("FOV Color", Color3.fromRGB(0, 200, 170), getCallback("Aim Assist%%FOV Color"))
+    aimassistsec:AddToggle("Use FOV", false, getCallback("Aim Assist%%Use FOV"))
+    aimassistsec:AddSlider("FOV Radius", 200, 2, 800, 1, "px", getCallback("Aim Assist%%FOV Radius"))
+    aimassistsec:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
 
     silentaim:AddToggle("Enabled", false, getCallback("Silent Aim%%Enabled")):AddKeyBind(nil, "Key Bind")
     silentaim:AddToggle("Visible Check", false, getCallback("Silent Aim%%Visible Check"))
