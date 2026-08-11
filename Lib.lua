@@ -5933,119 +5933,95 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
             end)
         end
 
-        if wapus:GetValue("Backtracking", "Enabled") then
-            local delay = 1 / wapus:GetValue("Backtracking", "Refresh Rate")
-
-            if clockTime > backtrackTime + delay then
-                replicationInterface.operateOnAllEntries(function(player, entry)
-                    local entryThirdPersonObject = entry._thirdPersonObject
-                    local character = entryThirdPersonObject and entryThirdPersonObject._character
-
-
-                    if entry._isEnemy then
-                        local clone
-
-                        -- determine a root CFrame to position proxies when character data is missing
-                        local rootCFrame = (entryThirdPersonObject and entryThirdPersonObject._rootPart and entryThirdPersonObject._rootPart.CFrame) or (entry._receivedPosition and CFrame.new(entry._receivedPosition)) or CFrame.new()
-
-                        if wapus:GetValue("Backtracking", "Clone Character") and character then
-                            clone = character:Clone()
-
-                            -- If the cloned character has no BasePart descendants, fall back to a proxy
-                            local hasBase = false
-                            for _, d in ipairs(clone:GetDescendants()) do
-                                if d:IsA("BasePart") then
-                                    hasBase = true
-                                    break
-                                end
-                            end
-
-                            if not hasBase then
-                                local proxy = Instance.new("Model")
-
-                                -- create a simple full-body proxy: head, torso, arms, legs
-                                local parts = {}
-                                local function makePart(name, size, offset)
-                                    local p = Instance.new("Part")
-                                    p.Name = name
-                                    p.Size = size
-                                    p.CFrame = rootCFrame * CFrame.new(offset)
-                                    p.Anchored = true
-                                    p.CanCollide = false
-                                    p.Parent = proxy
-                                    return p
-                                end
-
-                                parts.Head = makePart("Head", Vector3.new(1.25, 1.25, 1.25), Vector3.new(0, 1.6, 0))
-                                parts.Torso = makePart("Torso", Vector3.new(2, 2.5, 1), Vector3.new(0, 0.25, 0))
-                                parts.LeftArm = makePart("LeftArm", Vector3.new(0.9, 2, 0.9), Vector3.new(-1.25, 0.5, 0))
-                                parts.RightArm = makePart("RightArm", Vector3.new(0.9, 2, 0.9), Vector3.new(1.25, 0.5, 0))
-                                parts.LeftLeg = makePart("LeftLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(-0.45, -1.5, 0))
-                                parts.RightLeg = makePart("RightLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(0.45, -1.5, 0))
-
-                                clone:Destroy()
-                                clone = proxy
-                            end
-                        else
-                            -- create a simple proxy model at the reported position
-                            clone = Instance.new("Model")
-                            -- create a full-body proxy model for non-clone fallback
-                            local function makePart(name, size, offset, parent)
-                                local p = Instance.new("Part")
-                                p.Name = name
-                                p.Size = size
-                                p.CFrame = rootCFrame * CFrame.new(offset)
-                                p.Anchored = true
-                                p.CanCollide = false
-                                p.Parent = parent
-                                return p
-                            end
-
-                            makePart("Head", Vector3.new(1.25, 1.25, 1.25), Vector3.new(0, 1.6, 0), clone)
-                            makePart("Torso", Vector3.new(2, 2.5, 1), Vector3.new(0, 0.25, 0), clone)
-                            makePart("LeftArm", Vector3.new(0.9, 2, 0.9), Vector3.new(-1.25, 0.5, 0), clone)
-                            makePart("RightArm", Vector3.new(0.9, 2, 0.9), Vector3.new(1.25, 0.5, 0), clone)
-                            makePart("LeftLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(-0.45, -1.5, 0), clone)
-                            makePart("RightLeg", Vector3.new(0.9, 2.5, 0.9), Vector3.new(0.45, -1.5, 0), clone)
-                        end
-
-                        clone.Name = player.Name
-                        local properties = {
-                            Material = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
-                            Transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01,
-                            Color = wapus:GetValue("Backtracking", "Character Color"),
-                            CanCollide = false
-                        }
-
-                        for _, descendant in ipairs(clone:GetDescendants()) do
-                            if descendant:IsA("BasePart") then
-                                descendant.Anchored = true
-                                descendant.CanCollide = false
-                            end
-                        end
-
-                        local _, uncache = cham.new(clone, properties, false, true, false)
-                        clone.Parent = backtrackObjects
-
-                        task.delay(wapus:GetValue("Backtracking", "Character Duration"), function()
-                            local transparency = (1 - properties.Transparency) / 5
-
-                            for transparencyIndex = 1, 5 do
-                                properties.Transparency += transparency
-                                task.wait(0.05)
-                            end
-
-                            clone:Destroy()
-                            if uncache then
-                                uncache() -- you would not believe the lag
-                            end
-                        end)
-                    end
-                end)
-
-                backtrackTime = clockTime
-            end
-        end
+		if wapus:GetValue("Backtracking", "Enabled") then
+		    local delay = 1 / wapus:GetValue("Backtracking", "Refresh Rate")
+		
+		    if clockTime > backtrackTime + delay then
+		        replicationInterface.operateOnAllEntries(function(player, entry)
+		            local entryThirdPersonObject = entry._thirdPersonObject
+		
+		            if entry._isEnemy and entryThirdPersonObject then
+		                -- Build a proxy model directly from the live _characterModelHash parts
+		                -- This avoids using :Clone() on a non-standard Model object
+		                local hash = entryThirdPersonObject._characterModelHash
+		                local rootCFrame = (entryThirdPersonObject._rootPart and entryThirdPersonObject._rootPart.CFrame)
+		                    or (entry._receivedPosition and CFrame.new(entry._receivedPosition))
+		                    or CFrame.new()
+		
+		                local clone = Instance.new("Model")
+		                clone.Name = player.Name
+		
+		                if hash and wapus:GetValue("Backtracking", "Clone Character") then
+		                    -- Snapshot each named BasePart from the live hash table
+		                    for partName, livePart in hash do
+		                        if livePart:IsA("BasePart") then
+		                            local snap = Instance.new("Part")
+		                            snap.Name = partName
+		                            snap.Size = livePart.Size
+		                            snap.CFrame = livePart.CFrame  -- world CFrame from live part
+		                            snap.Anchored = true
+		                            snap.CanCollide = false
+		                            snap.Transparency = 1  -- cham lib will override
+		                            snap.Parent = clone
+		                        end
+		                    end
+		                end
+		
+		                -- If no parts were captured (hash empty or Clone Character off),
+		                -- fall back to a hand-built humanoid proxy positioned at the root
+		                local hasAnyPart = false
+		                for _ in clone:GetChildren() do hasAnyPart = true; break end
+		
+		                if not hasAnyPart then
+		                    local function makePart(name, size, offset)
+		                        local p = Instance.new("Part")
+		                        p.Name = name
+		                        p.Size = size
+		                        -- PF root is at the character's feet level; standard humanoid offsets:
+		                        p.CFrame = rootCFrame * CFrame.new(offset)
+		                        p.Anchored = true
+		                        p.CanCollide = false
+		                        p.Transparency = 1
+		                        p.Parent = clone
+		                    end
+		                    makePart("Head",     Vector3.new(1.25, 1.25, 1.25), Vector3.new(0,  2.85, 0))
+		                    makePart("Torso",    Vector3.new(2,    2,    1),     Vector3.new(0,  1.5,  0))
+		                    makePart("LeftArm",  Vector3.new(0.9,  2,    0.9),   Vector3.new(-1.35, 1.5, 0))
+		                    makePart("RightArm", Vector3.new(0.9,  2,    0.9),   Vector3.new( 1.35, 1.5, 0))
+		                    makePart("LeftLeg",  Vector3.new(0.9,  2,    0.9),   Vector3.new(-0.45, -0.5, 0))
+		                    makePart("RightLeg", Vector3.new(0.9,  2,    0.9),   Vector3.new( 0.45, -0.5, 0))
+		                end
+		
+		                local properties = {
+		                    Material    = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
+		                    Transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01,
+		                    Color       = wapus:GetValue("Backtracking", "Character Color"),
+		                    CanCollide  = false,
+		                }
+		
+		                local _, uncache = cham.new(clone, properties, false, true, false)
+		                clone.Parent = backtrackObjects
+		
+		                local duration = wapus:GetValue("Backtracking", "Character Duration")
+		                task.delay(duration, function()
+		                    if clone and clone.Parent then
+		                        local steps = 5
+		                        local startTrans = properties.Transparency
+		                        local step = (1 - startTrans) / steps
+		                        for _ = 1, steps do
+		                            properties.Transparency = math.min(properties.Transparency + step, 1)
+		                            task.wait(0.05)
+		                        end
+		                        clone:Destroy()
+		                        if uncache then uncache() end
+		                    end
+		                end)
+		            end
+		        end)
+		
+		        backtrackTime = clockTime
+		    end
+		end
     end));
 
     local aimTime;
