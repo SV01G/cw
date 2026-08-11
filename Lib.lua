@@ -1637,6 +1637,23 @@ do -- UI Library
         insert(self.mainSections, section)
         return section
     end
+	local visibleChams = {
+enabled = false,
+fill = Color3.fromRGB(0, 255, 0),
+outline = Color3.fromRGB(0, 0, 0),
+}
+
+callbackList["Enemy ESP%%Use Visible Colors"] = function(state)
+visibleChams.enabled = state
+end
+
+callbackList["Enemy ESP%%Visible Fill Color"] = function(state)
+visibleChams.fill = state
+end
+
+callbackList["Enemy ESP%%Visible Outline Color"] = function(state)
+visibleChams.outline = state
+end
 
     local players = game:GetService("Players")
     local localplayer = players.LocalPlayer
@@ -4588,52 +4605,56 @@ LPH_JIT_MAX(function() -- Main Cheat
         wmUser.ZIndex = 4
         wmUser.Visible = false
 
-        local function updateWatermarkLayout()
-            local titleW = wmTitle.TextBounds.X
-            local userW  = wmUser.TextBounds.X
-            local innerW = math.max(titleW, userW) + wmPad * 2
-            local innerH = 14 + wmGap + 13 + wmPad * 2
-            local totalW = wmAccW + innerW
-
-            local wmX, wmY = 8, 40
-
-            wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
-            wmOutline.Size     = Vector2.new(totalW + 2, innerH + 2)
-            wmOutline.Color    = Color3.fromRGB(40, 48, 70)
-            wmOutline.Filled   = true
-
-            wmBg.Position = Vector2.new(wmX, wmY)
-            wmBg.Size     = Vector2.new(totalW, innerH)
-            wmBg.Color    = Color3.fromRGB(13, 15, 21)
-            wmBg.Filled   = true
-
-            wmAccent.Position = Vector2.new(wmX, wmY)
-            wmAccent.Size     = Vector2.new(wmAccW, innerH)
-            wmAccent.Color    = Color3.fromRGB(0, 200, 170)
-            wmAccent.Filled   = true
-
-            wmSep.Position = Vector2.new(wmX + wmAccW, wmY + wmPad + 14 + math.floor(wmGap * 0.5))
-            wmSep.Size     = Vector2.new(innerW, 1)
-            wmSep.Color    = Color3.fromRGB(40, 48, 70)
-            wmSep.Filled   = true
-
-            wmTitle.Position = Vector2.new(wmX + wmAccW + wmPad, wmY + wmPad - 1)
-            wmUser.Position  = Vector2.new(wmX + wmAccW + wmPad, wmY + wmPad + 14 + wmGap)
-        end
+   local function updateWatermarkLayout()
+	    local text = string.format("%s  |  %s  |  %s", defaultUIName, wmLocalName, os.date("%H:%M"))
+	    wmTitle.Text = text
+	    wmTitle.Size = 13
+	    wmTitle.Color = Color3.fromRGB(225, 235, 255)
+	    wmTitle.Outline = true
+	    wmTitle.OutlineColor = Color3.new(0, 0, 0)
+	
+	    -- hide the second text line (not needed for horizontal style)
+	    wmUser.Visible = false
+	    wmSep.Visible = false
+	
+	    local textW = wmTitle.TextBounds.X
+	    local innerH = 18
+	    local totalW = wmAccW + textW + wmPad * 2
+	    local wmX, wmY = 8, 40   -- under Roblox top bar
+	
+	    wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
+	    wmOutline.Size = Vector2.new(totalW + 2, innerH + 2)
+	    wmOutline.Color = Color3.fromRGB(40, 48, 70)
+	    wmOutline.Filled = true
+	
+	    wmBg.Position = Vector2.new(wmX, wmY)
+	    wmBg.Size = Vector2.new(totalW, innerH)
+	    wmBg.Color = Color3.fromRGB(13, 15, 21)
+	    wmBg.Filled = true
+	
+	    wmAccent.Position = Vector2.new(wmX, wmY)
+	    wmAccent.Size = Vector2.new(wmAccW, innerH)
+	    wmAccent.Color = Color3.fromRGB(0, 200, 170)
+	    wmAccent.Filled = true
+	
+	    wmTitle.Position = Vector2.new(wmX + wmAccW + wmPad, wmY + 2)
+	end
 
         -- run layout after one frame so TextBounds are valid
         task.defer(updateWatermarkLayout)
-
-        callbackList["Cheat Settings%%Show Watermark"] = function(state)
-            local on = state == true
-            wmOutline.Visible = on
-            wmBg.Visible      = on
-            wmAccent.Visible  = on
-            wmSep.Visible     = on
-            wmTitle.Visible   = on
-            wmUser.Visible    = on
-        end
-    end
+		
+		callbackList["Cheat Settings%%Show Watermark"] = function(state)
+		    local on = state == true
+		    wmOutline.Visible = on
+		    wmBg.Visible = on
+		    wmAccent.Visible = on
+		    wmTitle.Visible = on
+		    wmUser.Visible = false
+		    wmSep.Visible = false
+		    if on then
+		        updateWatermarkLayout()
+		    end
+		end
 
     callbackList["Hit Boxes%%Enabled"] = function(state)
         hitboxObjects:ClearAllChildren()
@@ -6572,7 +6593,10 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Highlight Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Highlight Outline Color")):AddColorPicker("Highlight Fill Color", Color3.fromRGB(0,0,255), getCallback("Enemy ESP%%Highlight Fill Color"))
     enemyesp:AddSlider("Highlight Fill Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Fill Opacity"))
     enemyesp:AddSlider("Highlight Outline Transparency", 0, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Outline Opacity"))
-    enemyesp:AddToggle("Highlight Visible Check", false, getCallback("Enemy ESP%%Highlight Visible Check"))
+	enemyesp:AddToggle("Highlight Visible Check", false, getCallback("Enemy ESP%%Highlight Visible Check"))
+	enemyesp:AddToggle("Use Visible Colors", false, getCallback("Enemy ESP%%Use Visible Colors"))
+	enemyesp:AddColorPicker("Visible Fill Color", Color3.fromRGB(0, 255, 0), getCallback("Enemy ESP%%Visible Fill Color"))
+	enemyesp:AddColorPicker("Visible Outline Color", Color3.fromRGB(0, 0, 0), getCallback("Enemy ESP%%Visible Outline Color"))
 
     teamesp:AddToggle("Enabled", true, getCallback("Team ESP%%Enabled")):AddKeyBind(nil, "Key Bind")
     teamesp:AddToggle("Boxes", false, getCallback("Team ESP%%Boxes")):AddColorPicker("Box Color", Color3.fromRGB(0,255,255), getCallback("Team ESP%%Box Color"))
