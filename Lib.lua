@@ -4595,7 +4595,7 @@ LPH_JIT_MAX(function() -- Main Cheat
             local innerH = 14 + wmGap + 13 + wmPad * 2
             local totalW = wmAccW + innerW
 
-            local wmX, wmY = 8, 8
+            local wmX, wmY = 8, 40
 
             wmOutline.Position = Vector2.new(wmX - 1, wmY - 1)
             wmOutline.Size     = Vector2.new(totalW + 2, innerH + 2)
@@ -4624,7 +4624,7 @@ LPH_JIT_MAX(function() -- Main Cheat
         -- run layout after one frame so TextBounds are valid
         task.defer(updateWatermarkLayout)
 
-        callbackList["Tweaks%%Watermark"] = function(state)
+        callbackList["Cheat Settings%%Show Watermark"] = function(state)
             local on = state == true
             wmOutline.Visible = on
             wmBg.Visible      = on
@@ -6416,7 +6416,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
 
     local aimbot = legit:CreateSection("Aim Bot", false, "whole")
     local fovsettings = aimbot:AddSection("FOV Settings")
-    local aimassistsec = aimbot:AddSection("Aim Assist")
+    local aimassist = aimbot:AddSection("Aim Assist")
     local silentaim = legit:CreateSection("Silent Aim", true, "half")
     local backtrack = legit:CreateSection("Backtracking", false, "half")
     local hitboxes = backtrack:AddSection("Hit Boxes")
@@ -6461,15 +6461,15 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     fovsettings:AddSlider("Circle Opacity", 100, 1, 100, 1, "%", getCallback("FOV Settings%%Circle Opacity"))
     fovsettings:AddToggle("Fill Circles", false, getCallback("FOV Settings%%Fill Circles"))
 
-    aimassistsec:AddToggle("Enabled", false, getCallback("Aim Assist%%Enabled")):AddKeyBind(nil, "Aim Assist Bind")
-    aimassistsec:AddToggle("Visible Check", false, getCallback("Aim Assist%%Visible Check"))
-    aimassistsec:AddToggle("Only While Aiming", true, getCallback("Aim Assist%%Only While Aiming"))
-    aimassistsec:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
-    aimassistsec:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
-    aimassistsec:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
-    aimassistsec:AddToggle("Use FOV", false, getCallback("Aim Assist%%Use FOV"))
-    aimassistsec:AddSlider("FOV Radius", 200, 2, 800, 1, "px", getCallback("Aim Assist%%FOV Radius"))
-    aimassistsec:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
+    aimassist:AddToggle("Enabled", false, getCallback("Aim Assist%%Enabled")):AddKeyBind(nil, "Aim Assist Bind")
+    aimassist:AddToggle("Visible Check", false, getCallback("Aim Assist%%Visible Check"))
+    aimassist:AddToggle("Only While Aiming", true, getCallback("Aim Assist%%Only While Aiming"))
+    aimassist:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
+    aimassist:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
+    aimassist:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
+    aimassist:AddToggle("Use FOV", false, getCallback("Aim Assist%%Use FOV"))
+    aimassist:AddSlider("FOV Radius", 200, 2, 800, 1, "px", getCallback("Aim Assist%%FOV Radius"))
+    aimassist:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
 
     silentaim:AddToggle("Enabled", false, getCallback("Silent Aim%%Enabled")):AddKeyBind(nil, "Key Bind")
     silentaim:AddToggle("Visible Check", false, getCallback("Silent Aim%%Visible Check"))
@@ -6671,7 +6671,6 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     sounds:AddDropdown("Glass Breaking Sound", "None", soundFileList, getCallback("Sounds%%Glass Breaking Sound"))
     sounds:AddDropdown("Footstep Sound", "None", soundFileList, getCallback("Sounds%%Footstep Sound"))
 
-    tweaks:AddToggle("Watermark", false, getCallback("Tweaks%%Watermark"))
     tweaks:AddToggle("Custom Kill Notification", false, getCallback("Tweaks%%Custom Kill Notification"))
     tweaks:AddTextBox("Notification Text", "Chud Gone!", getCallback("Tweaks%%Notification Text"))
     tweaks:AddButton("Unlock All Attachments", getCallback("Tweaks%%Unlock All Attachments"))
@@ -6712,6 +6711,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     local configuration = settings:CreateSection("Configuration", true, "third")
 
     cheatSettings:AddToggle("Save Last Config", true, getCallback("Cheat Settings%%Save Last Config"))
+	cheatSettings:AddToggle("Show Watermark", false, getCallback("Cheat Settings%%Show Watermark"))
     cheatSettings:AddToggle("Show Keybind List", false, getCallback("Cheat Settings%%Show Keybind List"))
     cheatSettings:AddToggle("Show Key Name", false, getCallback("Cheat Settings%%Show Key Name"))
     cheatSettings:AddButton("Copy Discord Invite", function()
