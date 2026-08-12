@@ -3415,6 +3415,14 @@ LPH_JIT_MAX(function() -- Main Cheat
             teleporting = false
             hitboxObjects:ClearAllChildren()
             forwardtrackObjects:ClearAllChildren()
+            -- Wipe forwardtrack refs so the Heartbeat loop doesn't re-create ghosts
+            -- immediately after ClearAllChildren destroys them
+            for player, _ in pairs(forwardtrackGhosts) do
+                forwardtrackGhosts[player]   = nil
+                forwardtrackLastPos[player]  = nil
+                forwardtrackLastTime[player] = nil
+                forwardtrackVel[player]      = nil
+            end
             for player, queue in pairs(backtrackQueues) do
                 for _, g in ipairs(queue) do
                     if g and g.Parent then g:Destroy() end
@@ -5274,6 +5282,86 @@ LPH_JIT_MAX(function() -- Main Cheat
 
     espInterface.Load()
 
+    -- ── Custom enemy chams ────────────────────────────────────────────────────
+    -- cham.new per-player, color switches between visible/occluded each frame.
+    local enemyChamProps   = {}   -- [player] = properties table (written by cham RenderStepped)
+    local enemyChamUncache = {}   -- [player] = uncache fn
+    local enemyChamModel   = {}   -- [player] = Model passed to cham.new
+
+    local function buildEnemyChams()
+        for player, uncache in pairs(enemyChamUncache) do
+            pcall(uncache)
+            enemyChamProps[player]   = nil
+            enemyChamUncache[player] = nil
+            enemyChamModel[player]   = nil
+        end
+        if not wapus:GetValue("Enemy ESP%%Highlight Chams") then return end
+
+        replicationInterface.operateOnAllEntries(function(player, entry)
+            if not entry._isEnemy then return end
+            local thirdPerson = entry._thirdPersonObject
+            local char = thirdPerson and thirdPerson:getCharacterModel()
+            if not char then return end
+            local transp = (wapus:GetValue("Enemy ESP%%Chams Transparency") or 50) * 0.01
+            local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color") or Color3.fromRGB(255, 80, 80)
+            local props, uncacheFn = cham.new(char, {
+                Material     = Enum.Material.ForceField,
+                Color        = visColor,
+                Transparency = transp,
+            }, false, true, false)
+            if props then
+                enemyChamProps[player]   = props
+                enemyChamUncache[player] = uncacheFn
+                enemyChamModel[player]   = char
+            end
+        end)
+    end
+
+    -- Visibility-switching RenderStepped loop
+    local chamRayParams = RaycastParams.new()
+    chamRayParams.FilterType = Enum.RaycastFilterType.Exclude
+    table.insert(connectionList, game:GetService("RunService").RenderStepped:Connect(function()
+        if not wapus:GetValue("Enemy ESP%%Highlight Chams") then return end
+        chamRayParams.FilterDescendantsInstances = physicsignore
+        local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color")  or Color3.fromRGB(255, 80, 80)
+        local occColor = wapus:GetValue("Enemy ESP%%Chams Occluded Color") or Color3.fromRGB(80, 80, 255)
+        local transp   = (wapus:GetValue("Enemy ESP%%Chams Transparency")  or 50) * 0.01
+        local camPos   = camera.CFrame.Position
+
+        replicationInterface.operateOnAllEntries(function(player, entry)
+            if not entry._isEnemy then return end
+            local thirdPerson = entry._thirdPersonObject
+            local currentChar = thirdPerson and thirdPerson:getCharacterModel()
+            local props = enemyChamProps[player]
+            local char  = enemyChamModel[player]
+
+            -- Rebuild if character changed (respawn)
+            if currentChar and currentChar ~= char then
+                if enemyChamUncache[player] then pcall(enemyChamUncache[player]) end
+                local newProps, newUncache = cham.new(currentChar, {
+                    Material     = Enum.Material.ForceField,
+                    Color        = visColor,
+                    Transparency = transp,
+                }, false, true, false)
+                enemyChamProps[player]   = newProps
+                enemyChamUncache[player] = newUncache
+                enemyChamModel[player]   = currentChar
+                props = newProps; char = currentChar
+            end
+
+            if not props or not char then return end
+
+            local rootPart = thirdPerson and thirdPerson:getRootPart()
+            if not rootPart then return end
+            local dir    = rootPart.Position - camPos
+            local result = workspace:Raycast(camPos, dir, chamRayParams)
+            local isVisible = (not result) or (result.Instance and result.Instance:IsDescendantOf(char))
+
+            props.Color        = isVisible and visColor or occColor
+            props.Transparency = transp
+        end)
+    end))
+
     callbackList["Enemy ESP%%Enabled"] = function(state)
         espInterface.teamSettings.enemy.enabled = state
     end
@@ -5406,28 +5494,37 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     callbackList["Enemy ESP%%Highlight Chams"] = function(state)
-	    espInterface.teamSettings.enemy.chams = state
-	end
+        if state then
+            buildEnemyChams()
+        else
+            for player, uncache in pairs(enemyChamUncache) do
+                pcall(uncache)
+                enemyChamProps[player]   = nil
+                enemyChamUncache[player] = nil
+                enemyChamModel[player]   = nil
+            end
+        end
+    end
 
-callbackList["Enemy ESP%%Highlight Outline Color"] = function(state)
-	    espInterface.teamSettings.enemy.chamsOutlineColor[1] = state
-	end
+    callbackList["Enemy ESP%%Chams Visible Color"] = function(state)
+        -- color updates happen live in the RenderStepped loop
+    end
 
-callbackList["Enemy ESP%%Highlight Outline Opacity"] = function(state)
-	    espInterface.teamSettings.enemy.chamsOutlineColor[2] = state * 0.01
-	end
+    callbackList["Enemy ESP%%Chams Occluded Color"] = function(state) end
 
-callbackList["Enemy ESP%%Highlight Fill Color"] = function(state)
-	    espInterface.teamSettings.enemy.chamsFillColor[1] = state   -- was chamsOutlineColor (bug)
-	end
+    callbackList["Enemy ESP%%Chams Transparency"] = function(state)
+        for _, props in pairs(enemyChamProps) do
+            props.Transparency = state * 0.01
+        end
+    end
 
-callbackList["Enemy ESP%%Highlight Fill Opacity"] = function(state)
-	    espInterface.teamSettings.enemy.chamsFillColor[2] = state * 0.01   -- was chamsOutlineColor (bug)
-	end
-
-callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
-	    espInterface.teamSettings.enemy.chamsVisibleOnly = state
-	end
+    -- unused old keys (kept so saved configs don't error)
+    callbackList["Enemy ESP%%Highlight Outline Color"]      = function() end
+    callbackList["Enemy ESP%%Highlight Outline Opacity"]    = function() end
+    callbackList["Enemy ESP%%Highlight Fill Color"]         = function() end
+    callbackList["Enemy ESP%%Highlight Fill Opacity"]       = function() end
+    callbackList["Enemy ESP%%Highlight Visible Check"]      = function() end
+    callbackList["Enemy ESP%%Rebuild Chams"]                = buildEnemyChams
 
 
 
@@ -6858,10 +6955,8 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     enemyesp:AddToggle("Health Percents", false, getCallback("Enemy ESP%%Health Percents")):AddColorPicker("Health Number Color", Color3.fromRGB(255,255,255), getCallback("Enemy ESP%%Health Number Color"))
     --enemyesp:AddSlider("Text Size", 20, 5, 40, 1, " px", getCallback("Enemy ESP%%Text Size"))
     enemyesp:AddToggle("Text Outlines", true, getCallback("Enemy ESP%%Text Outlines")):AddColorPicker("Text Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Text Outline Color"))
-    enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Highlight Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Highlight Outline Color")):AddColorPicker("Highlight Fill Color", Color3.fromRGB(0,0,255), getCallback("Enemy ESP%%Highlight Fill Color"))
-    enemyesp:AddSlider("Highlight Fill Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Fill Opacity"))
-    enemyesp:AddSlider("Highlight Outline Transparency", 0, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Outline Opacity"))
-    enemyesp:AddToggle("Highlight Visible Check", false, getCallback("Enemy ESP%%Highlight Visible Check"))
+    enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Visible Color", Color3.fromRGB(255, 80, 80), getCallback("Enemy ESP%%Chams Visible Color")):AddColorPicker("Occluded Color", Color3.fromRGB(80, 80, 255), getCallback("Enemy ESP%%Chams Occluded Color"))
+    enemyesp:AddSlider("Chams Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Chams Transparency"))
 
     teamesp:AddToggle("Enabled", true, getCallback("Team ESP%%Enabled")):AddKeyBind(nil, "Key Bind")
     teamesp:AddToggle("Boxes", false, getCallback("Team ESP%%Boxes")):AddColorPicker("Box Color", Color3.fromRGB(0,255,255), getCallback("Team ESP%%Box Color"))
