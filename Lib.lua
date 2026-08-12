@@ -2867,7 +2867,43 @@ LPH_JIT_MAX(function() -- Main Cheat
     local ticketCache = {}
 
     local backtrackObjects = Instance.new("Folder", workspace)
+    local forwardtrackObjects = Instance.new("Folder", workspace)
     local hitboxObjects = Instance.new("Folder", workspace)
+
+    -- Collision groups: ghost parts must block bullet raycasts (CanCollide=true)
+    -- but must not physically push the local character around.
+    -- We put all ghost parts in "GhostParts" and all character parts in "LocalCharacter";
+    -- those two groups don't collide with each other, but both still collide with Default.
+    local physicsService = game:GetService("PhysicsService")
+    local ok1 = pcall(function() physicsService:RegisterCollisionGroup("GhostParts") end)
+    local ok2 = pcall(function() physicsService:RegisterCollisionGroup("LocalCharacter") end)
+    if ok1 and ok2 then
+        pcall(function() physicsService:CollisionGroupSetCollidable("GhostParts", "LocalCharacter", false) end)
+    end
+    -- Helper: stamp every part in a ghost model with the GhostParts group
+    local function applyGhostCollisionGroup(model)
+        for _, part in ipairs(model:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function() part.CollisionGroup = "GhostParts" end)
+            end
+        end
+    end
+    -- Reassign local character parts to LocalCharacter group whenever character spawns
+    local function applyLocalCharCollisionGroup()
+        local char = localplayer.Character
+        if not char then return end
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function() part.CollisionGroup = "LocalCharacter" end)
+            end
+        end
+    end
+    -- Apply on first spawn and every respawn
+    pcall(applyLocalCharCollisionGroup)
+    localplayer.CharacterAdded:Connect(function()
+        task.wait()  -- wait one frame for parts to parent
+        applyLocalCharCollisionGroup()
+    end)
     local aimbotfov = drawing.new("Circle")
     local aimbotdeadfov = drawing.new("Circle")
     local silentaimfov = drawing.new("Circle")
@@ -2924,7 +2960,7 @@ LPH_JIT_MAX(function() -- Main Cheat
 
     local pathfinding = loadstring(game:HttpGet("https://raw.githubusercontent.com/iRay888/wapus/refs/heads/main/pathfinding.lua"))() -- i didnt make this, i did fix it tho cuz pro
 
-    local physicsignore = {workspace.Terrain, ignore, workspace.Players, camera, hitboxObjects, backtrackObjects}
+    local physicsignore = {workspace.Terrain, ignore, workspace.Players, camera, hitboxObjects, backtrackObjects, forwardtrackObjects}
     local raycastparameters = RaycastParams.new()
     local function raycast(origin, direction, filterlist, whitelist)
         raycastparameters.IgnoreWater = true
@@ -3204,6 +3240,8 @@ LPH_JIT_MAX(function() -- Main Cheat
                     return  -- allow hit
                 elseif part:IsDescendantOf(backtrackObjects) then
                     return  -- allow hit
+                elseif part:IsDescendantOf(forwardtrackObjects) then
+                    return  -- allow hit
                 elseif not part.CanCollide then
                     return true
                 elseif part.Transparency == 1 then
@@ -3376,6 +3414,7 @@ LPH_JIT_MAX(function() -- Main Cheat
         if name == "spawn" then
             teleporting = false
             hitboxObjects:ClearAllChildren()
+                forwardtrackObjects:ClearAllChildren()
             newSpawnCache = {
                 currentAddition = newSpawnCache.currentAddition or 0,
                 latency = newSpawnCache.latency or 0,
@@ -3858,6 +3897,18 @@ LPH_JIT_MAX(function() -- Main Cheat
                             ticketCache[extra.bulletTicket] = true
                             send(network, "bullethit", extra.uniqueId, players[part.Name], position, wapus:GetValue("Hit Boxes", "Hit Part"), extra.bulletTicket + ticketAddition, network.getTime() + newSpawnCache.latency + newSpawnCache.currentAddition)
                         elseif wapus:GetValue("Backtracking", "Enabled") and part:IsDescendantOf(backtrackObjects) then
+                            local model = part
+
+                            while (model.ClassName ~= "Model" or model.Parent.ClassName ~= "Folder") do
+                                model = model.Parent
+                            end
+
+                            local player = players[model.Name]
+                            local hitPart = (part.Name == "Head") and "Head" or "Torso"
+
+                            ticketCache[extra.bulletTicket] = true
+                            send(network, "bullethit", extra.uniqueId, player, position, hitPart, extra.bulletTicket + ticketAddition, network.getTime() + newSpawnCache.latency + newSpawnCache.currentAddition)
+                        elseif wapus:GetValue("Forward Tracking", "Enabled") and part:IsDescendantOf(forwardtrackObjects) then
                             local model = part
 
                             while (model.ClassName ~= "Model" or model.Parent.ClassName ~= "Folder") do
@@ -5982,8 +6033,7 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                     end
 
                     ghost.Parent = backtrackObjects
-
-                    -- Apply cham properties via the existing cham library
+                    applyGhostCollisionGroup(ghost)
                     local chamProps = {
                         Material     = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
                         Transparency = userTransparency,
@@ -6013,7 +6063,108 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
         end
     end));
 
-    local aimTime;
+    -- ── Forward Tracking ──────────────────────────────────────────────────────
+    -- Spawns a predicted-position ghost at where each enemy WILL BE based on
+    -- their current velocity. Hit registration fires the same bullethit packet
+    -- as backtrack. The ghost is replaced every tick (no fade — it's live).
+    local forwardtrackTime  = 0
+    local forwardtrackGhosts = {}   -- [player] = Model currently in world
+
+    table.insert(connectionList, runService.Heartbeat:Connect(function()
+        if not wapus:GetValue("Forward Tracking", "Enabled") then
+            -- clean up any lingering ghosts when disabled
+            if next(forwardtrackGhosts) then
+                for player, ghost in pairs(forwardtrackGhosts) do
+                    if ghost and ghost.Parent then ghost:Destroy() end
+                    forwardtrackGhosts[player] = nil
+                end
+            end
+            return
+        end
+
+        local now = os.clock()
+        local delay = 1 / wapus:GetValue("Forward Tracking", "Refresh Rate")
+        if now - forwardtrackTime < delay then return end
+        forwardtrackTime = now
+
+        local predictionTime = wapus:GetValue("Forward Tracking", "Prediction Time")
+        local userTransparency = wapus:GetValue("Forward Tracking", "Character Transparency") * 0.01
+        local matEnum = Enum.Material[wapus:GetValue("Forward Tracking", "Character Material")]
+        local color   = wapus:GetValue("Forward Tracking", "Character Color")
+
+        -- Track which players we refreshed this tick so we can cull stale ghosts
+        local seen = {}
+
+        replicationInterface.operateOnAllEntries(function(player, entry)
+            if not entry._isEnemy then return end
+
+            local thirdPerson = entry._thirdPersonObject
+            local charHash    = thirdPerson and thirdPerson._characterModelHash
+            if not charHash then return end
+
+            -- Compute velocity from movementCache (same formula as rage bot / silent aim)
+            local vel = Vector3.zero
+            local posCache  = movementCache.position[player]
+            local timeCache = movementCache.time
+            if posCache and posCache[15] and timeCache[15] and timeCache[1] and (timeCache[15] - timeCache[1]) ~= 0 then
+                vel = (posCache[15] - posCache[1]) / (timeCache[15] - timeCache[1])
+            end
+
+            -- Build or reuse a ghost for this player
+            local ghost = forwardtrackGhosts[player]
+            if not ghost or not ghost.Parent then
+                ghost = Instance.new("Model")
+                ghost.Name   = player.Name
+                ghost.Parent = forwardtrackObjects
+                applyGhostCollisionGroup(ghost)
+                forwardtrackGhosts[player] = ghost
+            end
+
+            -- Sync parts: add missing, update existing, remove extra
+            local partNames = {}
+            for partName, src in pairs(charHash) do
+                if typeof(src) == "Instance" and src:IsA("BasePart") then
+                    partNames[partName] = true
+                    local predictedCFrame = src.CFrame + vel * predictionTime
+
+                    local copy = ghost:FindFirstChild(partName)
+                    if not copy then
+                        copy = Instance.new("Part")
+                        copy.Name         = partName
+                        copy.Size         = src.Size
+                        copy.Anchored     = true
+                        copy.CanCollide   = true
+                        copy.CastShadow   = false
+                        copy.Transparency = 0
+                        copy.Color        = color
+                        copy.Material     = matEnum
+                        pcall(function() copy.CollisionGroup = "GhostParts" end)
+                        copy.Parent = ghost
+                    end
+
+                    copy.CFrame       = predictedCFrame
+                    copy.Color        = color
+                    copy.Material     = matEnum
+                    copy.Transparency = userTransparency
+                end
+            end
+
+            -- Remove parts that no longer exist in charHash
+            for _, child in ipairs(ghost:GetChildren()) do
+                if not partNames[child.Name] then child:Destroy() end
+            end
+
+            seen[player] = true
+        end)
+
+        -- Destroy ghosts for players that disappeared
+        for player, ghost in pairs(forwardtrackGhosts) do
+            if not seen[player] then
+                if ghost and ghost.Parent then ghost:Destroy() end
+                forwardtrackGhosts[player] = nil
+            end
+        end
+    end));
 
     local lastUpdate = tick();
     table.insert(connectionList, runService.RenderStepped:Connect(LPH_NO_VIRTUALIZE(function(deltaTime)
@@ -6158,6 +6309,7 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
         charObject.jump = jump
 
         backtrackObjects:Destroy()
+        forwardtrackObjects:Destroy()
         hitboxObjects:Destroy()
     end
     -- now was that so bad?
@@ -6419,6 +6571,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     local aimassist = aimbot:AddSection("Aim Assist")
     local silentaim = legit:CreateSection("Silent Aim", true, "half")
     local backtrack = legit:CreateSection("Backtracking", false, "half")
+    local forwardtrack = legit:CreateSection("Forward Tracking", false, "half")
     local hitboxes = backtrack:AddSection("Hit Boxes")
     local gunmods = legit:CreateSection("Gun Mods", true, "half")
 
@@ -6490,11 +6643,17 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     hitboxes:AddDropdown("Material", "SmoothPlastic", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Hit Boxes%%Material"))
 
     backtrack:AddToggle("Enabled", false, getCallback("Backtracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(0.1, 0.1, 1), getCallback("Backtracking%%Character Color"))
-    backtrack:AddSlider("Refresh Rate", 2, 1, 10, 1, " Characters/Second", getCallback("Backtracking%%Refresh Rate"))
-    backtrack:AddSlider("Character Duration", 1, 0.1, 1, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
+    backtrack:AddSlider("Refresh Rate", 2, 1, 30, 1, " Characters/Second", getCallback("Backtracking%%Refresh Rate"))
+    backtrack:AddSlider("Character Duration", 1, 0.1, 5, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
     backtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Backtracking%%Character Transparency"))
     backtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Backtracking%%Character Material"))
     backtrack:AddToggle("Clone Character", true, getCallback("Backtracking%%Clone Character"))
+
+    forwardtrack:AddToggle("Enabled", false, getCallback("Forward Tracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(1, 0.5, 0.1), getCallback("Forward Tracking%%Character Color"))
+    forwardtrack:AddSlider("Refresh Rate", 20, 1, 30, 1, " Updates/Second", getCallback("Forward Tracking%%Refresh Rate"))
+    forwardtrack:AddSlider("Prediction Time", 0.15, 0.05, 1, 0.05, " Seconds", getCallback("Forward Tracking%%Prediction Time"))
+    forwardtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Forward Tracking%%Character Transparency"))
+    forwardtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Forward Tracking%%Character Material"))
 
     gunmods:AddToggle("No Recoil", false, getCallback("Gun Mods%%No Recoil"))
     gunmods:AddToggle("No Spread", false, getCallback("Gun Mods%%No Spread"))
