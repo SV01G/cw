@@ -3887,7 +3887,7 @@ LPH_JIT_MAX(function() -- Main Cheat
                 end
             end
 
-            if wapus:GetValue("Backtracking", "Enabled") or wapus:GetValue("Hit Boxes", "Enabled") then
+            if wapus:GetValue("Backtracking", "Enabled") or wapus:GetValue("Hit Boxes", "Enabled") or wapus:GetValue("Forward Tracking", "Enabled") then
                 local ontouch = bulletData.ontouch
                 local extra = bulletData.extra
 
