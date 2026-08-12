@@ -3200,11 +3200,13 @@ LPH_JIT_MAX(function() -- Main Cheat
     function raycastLib.raycast(origin, direction, ignoreList, ignoreFunc, a5) -- idk wtf this last parameter is maybe resetIgnoreCache?
         if getfenv(ignoreFunc).script == getfenv(bulletcheck).script then
             ignoreFunc = function(part)
-                if not part.CanCollide then
+                if part:IsDescendantOf(hitboxObjects) then
+                    return  -- allow hit
+                elseif part:IsDescendantOf(backtrackObjects) then
+                    return  -- allow hit
+                elseif not part.CanCollide then
                     return true
                 elseif part.Transparency == 1 then
-                    return true
-                elseif part:IsDescendantOf(hitboxObjects) then
                     return true
                 else
                     return
@@ -4581,9 +4583,8 @@ LPH_JIT_MAX(function() -- Main Cheat
         wmUser.Visible = false
 
         local function updateWatermarkLayout()
-            -- gamesense-style: "CheatName  PlayerName  |  HH:MM"
-            local timeStr = os.date("%H:%M")
-            local text = string.format("%s  %s  |  %s", defaultUIName, wmLocalName, timeStr)
+            -- gamesense-style: "CheatName  PlayerName"
+            local text = string.format("%s  %s", defaultUIName, wmLocalName)
 
             wmTitle.Text = text
             wmTitle.Size = 13
@@ -5971,7 +5972,7 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                             copy.Size         = src.Size
                             copy.CFrame       = src.CFrame
                             copy.Anchored     = true
-                            copy.CanCollide   = false
+                            copy.CanCollide   = true   -- must be true so bullet raycast can hit it
                             copy.CastShadow   = false
                             copy.Transparency = 0  -- must be 0; cham lib skips T==1 parts
                             copy.Color        = wapus:GetValue("Backtracking", "Character Color")
@@ -6143,7 +6144,7 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
         -- Watermark live clock: update at most once per second
         if wapus:GetValue("Cheat Settings", "Show Watermark") and (clockTime - wmLastClock) >= 1 then
             wmLastClock = clockTime
-            updateWatermarkLayout()
+            -- no-op: clock removed from watermark, kept for future use
         end
     end)))
 
