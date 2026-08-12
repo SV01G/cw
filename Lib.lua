@@ -5992,7 +5992,16 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
             if clockTime > backtrackTime + delay then
                 replicationInterface.operateOnAllEntries(function(player, entry)
                     if not entry._isEnemy then return end
- 
+
+                    -- Clear existing ghosts for this player if they've died
+                    local repEntry = replicationInterface.getEntry(player)
+                    if repEntry and not repEntry:isAlive() then
+                        for _, ghost in ipairs(backtrackObjects:GetChildren()) do
+                            if ghost.Name == player.Name then ghost:Destroy() end
+                        end
+                        return
+                    end
+
                     local thirdPerson = entry._thirdPersonObject
                     -- _characterModelHash is the {partName = BasePart} table used by PF's replication.
                     -- _character is the animated Model which may be nil when the player isn't rendered.
@@ -6097,6 +6106,15 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
 
         replicationInterface.operateOnAllEntries(function(player, entry)
             if not entry._isEnemy then return end
+
+            -- Destroy this player's forward ghost if they've died
+            local repEntry = replicationInterface.getEntry(player)
+            if repEntry and not repEntry:isAlive() then
+                local ghost = forwardtrackGhosts[player]
+                if ghost and ghost.Parent then ghost:Destroy() end
+                forwardtrackGhosts[player] = nil
+                return
+            end
 
             local thirdPerson = entry._thirdPersonObject
             local charHash    = thirdPerson and thirdPerson._characterModelHash
@@ -6571,8 +6589,8 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     local aimassist = aimbot:AddSection("Aim Assist")
     local silentaim = legit:CreateSection("Silent Aim", true, "half")
     local backtrack = legit:CreateSection("Backtracking", false, "half")
-    local forwardtrack = legit:CreateSection("Forward Tracking", false, "half")
     local hitboxes = backtrack:AddSection("Hit Boxes")
+    local forwardtrack = backtrack:AddSection("Forward Tracking")
     local gunmods = legit:CreateSection("Gun Mods", true, "half")
 
     local ragebot = rage:CreateSection("Rage Bot", false, "half")
