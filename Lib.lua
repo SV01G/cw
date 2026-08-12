@@ -6081,48 +6081,40 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
     end));
 
     -- ── Forward Tracking ──────────────────────────────────────────────────────
-    -- Keeps up to N predicted-position ghost snapshots per enemy (same pattern
-    -- as backtrack). Velocity is derived from _receivedPosition deltas we track
-    -- ourselves every Heartbeat, so it works even before movementCache fills up.
-    local forwardtrackGhosts    = {}   -- [player] = list of live ghost Models (FIFO)
-    local forwardtrackLastPos   = {}   -- [player] = last known _receivedPosition
-    local forwardtrackLastTime  = {}   -- [player] = os.clock() when lastPos was recorded
-    local forwardtrackVel       = {}   -- [player] = smoothed velocity Vector3
+    -- One stable ghost per enemy that updates its part CFrames in place every
+    -- Heartbeat. No spawning/destroying every tick — the ghost persists while
+    -- the player is alive and parts just glide to the predicted position.
+    local forwardtrackGhosts   = {}   -- [player] = single persistent Model
+    local forwardtrackLastPos  = {}   -- [player] = last _receivedPosition sample
+    local forwardtrackLastTime = {}   -- [player] = os.clock() of that sample
+    local forwardtrackVel      = {}   -- [player] = heavily smoothed velocity
 
     table.insert(connectionList, runService.Heartbeat:Connect(function()
         if not wapus:GetValue("Forward Tracking", "Enabled") then
-            -- clean up any lingering ghosts when disabled
-            for player, ghosts in pairs(forwardtrackGhosts) do
-                for _, g in ipairs(ghosts) do
-                    if g and g.Parent then g:Destroy() end
-                end
+            for player, ghost in pairs(forwardtrackGhosts) do
+                if ghost and ghost.Parent then ghost:Destroy() end
                 forwardtrackGhosts[player] = nil
             end
             return
         end
 
-        local now          = os.clock()
-        local maxGhosts    = math.max(1, math.floor(wapus:GetValue("Forward Tracking", "Max Ghosts")))
-        local predTime     = wapus:GetValue("Forward Tracking", "Prediction Time")
-        local userTrans    = wapus:GetValue("Forward Tracking", "Character Transparency") * 0.01
-        local matEnum      = Enum.Material[wapus:GetValue("Forward Tracking", "Character Material")]
-        local color        = wapus:GetValue("Forward Tracking", "Character Color")
+        local now       = os.clock()
+        local predTime  = wapus:GetValue("Forward Tracking", "Prediction Time")
+        local userTrans = wapus:GetValue("Forward Tracking", "Character Transparency") * 0.01
+        local matEnum   = Enum.Material[wapus:GetValue("Forward Tracking", "Character Material")]
+        local color     = wapus:GetValue("Forward Tracking", "Character Color")
 
         local seen = {}
 
         replicationInterface.operateOnAllEntries(function(player, entry)
             if not entry._isEnemy then return end
 
-            -- Clear ghost if player is dead
+            -- Destroy ghost if player died
             local repEntry = replicationInterface.getEntry(player)
             if repEntry and not repEntry:isAlive() then
-                local ghosts = forwardtrackGhosts[player]
-                if ghosts then
-                    for _, g in ipairs(ghosts) do
-                        if g and g.Parent then g:Destroy() end
-                    end
-                    forwardtrackGhosts[player] = nil
-                end
+                local ghost = forwardtrackGhosts[player]
+                if ghost and ghost.Parent then ghost:Destroy() end
+                forwardtrackGhosts[player] = nil
                 forwardtrackLastPos[player]  = nil
                 forwardtrackLastTime[player] = nil
                 forwardtrackVel[player]      = nil
@@ -6133,101 +6125,84 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
             local charHash    = thirdPerson and thirdPerson._characterModelHash
             if not charHash then return end
 
-            -- Need at least one BasePart
-            local hasBase = false
-            for _, part in pairs(charHash) do
-                if typeof(part) == "Instance" and part:IsA("BasePart") then
-                    hasBase = true; break
-                end
-            end
-            if not hasBase then return end
-
-            -- ── Velocity: derive from _receivedPosition delta ──
+            -- ── Velocity from _receivedPosition delta, heavily smoothed ──
             local curPos = entry._receivedPosition
             if curPos then
                 local prevPos  = forwardtrackLastPos[player]
                 local prevTime = forwardtrackLastTime[player]
-                if prevPos and prevTime and (now - prevTime) > 0 then
+                if prevPos and prevTime and (now - prevTime) > 0.01 then
                     local rawVel = (curPos - prevPos) / (now - prevTime)
-                    -- Exponential smoothing so one jittery frame doesn't spike the ghost
-                    local prev = forwardtrackVel[player] or rawVel
-                    forwardtrackVel[player] = prev:Lerp(rawVel, 0.4)
+                    local prev   = forwardtrackVel[player] or rawVel
+                    -- 0.12 = very heavy smoothing so ghost barely reacts to noise
+                    forwardtrackVel[player]      = prev:Lerp(rawVel, 0.12)
+                    forwardtrackLastPos[player]  = curPos
+                    forwardtrackLastTime[player] = now
+                elseif not prevPos then
+                    forwardtrackLastPos[player]  = curPos
+                    forwardtrackLastTime[player] = now
                 end
-                forwardtrackLastPos[player]  = curPos
-                forwardtrackLastTime[player] = now
             end
 
             local vel = forwardtrackVel[player] or Vector3.zero
 
-            -- ── Enforce ghost cap (FIFO, same as backtrack) ──
-            forwardtrackGhosts[player] = forwardtrackGhosts[player] or {}
-            local ghosts = forwardtrackGhosts[player]
-            while #ghosts >= maxGhosts do
-                local oldest = table.remove(ghosts, 1)
-                if oldest and oldest.Parent then oldest:Destroy() end
+            -- ── Get or create the single persistent ghost for this player ──
+            local ghost = forwardtrackGhosts[player]
+            if not ghost or not ghost.Parent then
+                ghost = Instance.new("Model")
+                ghost.Name   = player.Name
+                ghost.Parent = forwardtrackObjects
+                applyGhostCollisionGroup(ghost)
+                forwardtrackGhosts[player] = ghost
             end
 
-            -- ── Build snapshot at predicted position ──
-            local ghost = Instance.new("Model")
-            ghost.Name = player.Name
-
+            -- ── Update parts in-place: create if missing, lerp CFrame if existing ──
+            local partNames = {}
             for partName, src in pairs(charHash) do
                 if typeof(src) == "Instance" and src:IsA("BasePart") then
-                    local copy = Instance.new("Part")
-                    copy.Name         = partName
-                    copy.Size         = src.Size
-                    copy.CFrame       = src.CFrame + vel * predTime
-                    copy.Anchored     = true
-                    copy.CanCollide   = true
-                    copy.CastShadow   = false
-                    copy.Transparency = 0
-                    copy.Color        = color
-                    copy.Material     = matEnum
-                    pcall(function() copy.CollisionGroup = "GhostParts" end)
-                    copy.Parent = ghost
+                    partNames[partName] = true
+                    local predicted = src.CFrame + vel * predTime
+
+                    local copy = ghost:FindFirstChild(partName)
+                    if not copy then
+                        copy = Instance.new("Part")
+                        copy.Name         = partName
+                        copy.Size         = src.Size
+                        copy.CFrame       = predicted
+                        copy.Anchored     = true
+                        copy.CanCollide   = true
+                        copy.CastShadow   = false
+                        copy.Transparency = userTrans
+                        copy.Color        = color
+                        copy.Material     = matEnum
+                        pcall(function() copy.CollisionGroup = "GhostParts" end)
+                        copy.Parent = ghost
+                    else
+                        -- Lerp toward prediction — ghost glides smoothly instead of snapping
+                        copy.CFrame       = copy.CFrame:Lerp(predicted, 0.25)
+                        copy.Transparency = userTrans
+                        copy.Color        = color
+                        copy.Material     = matEnum
+                    end
                 end
             end
 
-            ghost.Parent = forwardtrackObjects
-            applyGhostCollisionGroup(ghost)
-            table.insert(ghosts, ghost)
-
-            -- Fade and destroy after duration
-            local duration = wapus:GetValue("Forward Tracking", "Ghost Duration")
-            task.delay(duration, function()
-                local steps    = 10
-                local fadeStep = (1 - userTrans) / steps
-                local trans    = userTrans
-                for i = 1, steps do
-                    trans = math.min(trans + fadeStep, 0.99)
-                    for _, part in ipairs(ghost:GetChildren()) do
-                        if part:IsA("BasePart") then part.Transparency = trans end
-                    end
-                    task.wait(0.04)
-                end
-                if ghost and ghost.Parent then ghost:Destroy() end
-                -- Also remove from the list if still there
-                local list = forwardtrackGhosts[player]
-                if list then
-                    for i, g in ipairs(list) do
-                        if g == ghost then table.remove(list, i); break end
-                    end
-                end
-            end)
+            -- Remove parts that no longer exist in the hash
+            for _, child in ipairs(ghost:GetChildren()) do
+                if not partNames[child.Name] then child:Destroy() end
+            end
 
             seen[player] = true
         end)
 
-        -- Destroy ghosts for players that disappeared entirely
-        for player, ghosts in pairs(forwardtrackGhosts) do
+        -- Clean up ghosts for players that left the replication table
+        for player, ghost in pairs(forwardtrackGhosts) do
             if not seen[player] then
-                for _, g in ipairs(ghosts) do
-                    if g and g.Parent then g:Destroy() end
-                end
+                if ghost and ghost.Parent then ghost:Destroy() end
                 forwardtrackGhosts[player] = nil
             end
         end
     end));
+
 
     local lastUpdate = tick();
     table.insert(connectionList, runService.RenderStepped:Connect(LPH_NO_VIRTUALIZE(function(deltaTime)
@@ -6713,8 +6688,6 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     backtrack:AddToggle("Clone Character", true, getCallback("Backtracking%%Clone Character"))
 
     forwardtrack:AddToggle("Enabled", false, getCallback("Forward Tracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(1, 0.5, 0.1), getCallback("Forward Tracking%%Character Color"))
-    forwardtrack:AddSlider("Max Ghosts", 5, 1, 30, 1, " Ghosts", getCallback("Forward Tracking%%Max Ghosts"))
-    forwardtrack:AddSlider("Ghost Duration", 0.5, 0.1, 5, 0.1, " Seconds", getCallback("Forward Tracking%%Ghost Duration"))
     forwardtrack:AddSlider("Prediction Time", 0.15, 0.05, 1, 0.05, " Seconds", getCallback("Forward Tracking%%Prediction Time"))
     forwardtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Forward Tracking%%Character Transparency"))
     forwardtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Forward Tracking%%Character Material"))
