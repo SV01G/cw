@@ -2870,40 +2870,13 @@ LPH_JIT_MAX(function() -- Main Cheat
     local forwardtrackObjects = Instance.new("Folder", workspace)
     local hitboxObjects = Instance.new("Folder", workspace)
 
-    -- Collision groups: ghost parts must block bullet raycasts (CanCollide=true)
-    -- but must not physically push the local character around.
-    -- We put all ghost parts in "GhostParts" and all character parts in "LocalCharacter";
-    -- those two groups don't collide with each other, but both still collide with Default.
-    local physicsService = game:GetService("PhysicsService")
-    local ok1 = pcall(function() physicsService:RegisterCollisionGroup("GhostParts") end)
-    local ok2 = pcall(function() physicsService:RegisterCollisionGroup("LocalCharacter") end)
-    if ok1 and ok2 then
-        pcall(function() physicsService:CollisionGroupSetCollidable("GhostParts", "LocalCharacter", false) end)
-    end
-    -- Helper: stamp every part in a ghost model with the GhostParts group
+    -- Ghost parts use CanCollide=false so players don't bump into them.
+    -- The bullet raycast ignoreFunc whitelists backtrackObjects/forwardtrackObjects
+    -- BEFORE checking CanCollide, so hit detection still works correctly.
     local function applyGhostCollisionGroup(model)
-        for _, part in ipairs(model:GetDescendants()) do
-            if part:IsA("BasePart") then
-                pcall(function() part.CollisionGroup = "GhostParts" end)
-            end
-        end
+        -- no-op: collision groups removed (caused spawn errors).
+        -- CanCollide=false on ghost parts is sufficient; see raycast ignoreFunc.
     end
-    -- Reassign local character parts to LocalCharacter group whenever character spawns
-    local function applyLocalCharCollisionGroup()
-        local char = localplayer.Character
-        if not char then return end
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                pcall(function() part.CollisionGroup = "LocalCharacter" end)
-            end
-        end
-    end
-    -- Apply on first spawn and every respawn
-    pcall(applyLocalCharCollisionGroup)
-    localplayer.CharacterAdded:Connect(function()
-        task.wait()  -- wait one frame for parts to parent
-        applyLocalCharCollisionGroup()
-    end)
     local aimbotfov = drawing.new("Circle")
     local aimbotdeadfov = drawing.new("Circle")
     local silentaimfov = drawing.new("Circle")
@@ -6154,7 +6127,7 @@ LPH_JIT_MAX(function() -- Main Cheat
                         copy.Size         = src.Size
                         copy.CFrame       = src.CFrame
                         copy.Anchored     = true
-                        copy.CanCollide   = true
+                        copy.CanCollide   = false
                         copy.CastShadow   = false
                         copy.Transparency = 0
                         copy.Color        = wapus:GetValue("Backtracking", "Character Color")
@@ -6297,12 +6270,11 @@ LPH_JIT_MAX(function() -- Main Cheat
                         copy.Size         = src.Size
                         copy.CFrame       = predicted
                         copy.Anchored     = true
-                        copy.CanCollide   = true
+                        copy.CanCollide   = false
                         copy.CastShadow   = false
                         copy.Transparency = userTrans
                         copy.Color        = color
                         copy.Material     = matEnum
-                        pcall(function() copy.CollisionGroup = "GhostParts" end)
                         copy.Parent = primary
                     else
                         copy.CFrame       = copy.CFrame:Lerp(predicted, 0.25)
@@ -6341,12 +6313,11 @@ LPH_JIT_MAX(function() -- Main Cheat
                             copy.Size         = src.Size
                             copy.CFrame       = src.CFrame + vel * trailOffset
                             copy.Anchored     = true
-                            copy.CanCollide   = true
+                            copy.CanCollide   = false
                             copy.CastShadow   = false
                             copy.Transparency = math.min(userTrans + 0.15, 0.95)  -- slightly more transparent
                             copy.Color        = color
                             copy.Material     = matEnum
-                            pcall(function() copy.CollisionGroup = "GhostParts" end)
                             copy.Parent = snap
                         end
                     end
