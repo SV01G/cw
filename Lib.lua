@@ -5616,7 +5616,7 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
     end
 
     local objectChamUncache
-    local backtrackTime = 0
+
     local lastRandom = 0
     local lastJitter = 0
     local lastJitterStarted = false
@@ -5987,10 +5987,13 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
         end
 
     if wapus:GetValue("Backtracking", "Enabled") then
-            local delay = 1 / wapus:GetValue("Backtracking", "Refresh Rate")
- 
-            if clockTime > backtrackTime + delay then
-                replicationInterface.operateOnAllEntries(function(player, entry)
+            -- Refresh Rate is now the MAX number of ghost snapshots kept per player.
+            -- Every Heartbeat tick we spawn one new snapshot; when the player already has
+            -- <max> ghosts we destroy the oldest before adding the new one (FIFO).
+            -- More ghosts = bigger overlapping hitbox = easier to hit.
+            local maxGhosts = math.max(1, math.floor(wapus:GetValue("Backtracking", "Refresh Rate")))
+
+            replicationInterface.operateOnAllEntries(function(player, entry)
                     if not entry._isEnemy then return end
 
                     -- Clear existing ghosts for this player if they've died
@@ -6017,10 +6020,19 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                     end
                     if not hasBase then return end
 
+                    -- Enforce ghost cap: if already at max, remove the oldest (first child with this name)
+                    local existing = {}
+                    for _, child in ipairs(backtrackObjects:GetChildren()) do
+                        if child.Name == player.Name then
+                            table.insert(existing, child)
+                        end
+                    end
+                    while #existing >= maxGhosts do
+                        existing[1]:Destroy()
+                        table.remove(existing, 1)
+                    end
+
                     -- ── Snapshot: build a ghost folder of frozen BaseParts ──
-                    -- We don't clone the animated Model (which may be unparented/nil).
-                    -- Instead we snapshot directly from the hash, which is always valid.
-                    -- IMPORTANT: parts must NOT start at Transparency=1 — cham lib skips those.
                     local userTransparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01
                     local ghost = Instance.new("Model")
                     ghost.Name = player.Name
@@ -6050,14 +6062,13 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                     }
                     local _, uncache = cham.new(ghost, chamProps, false, true, false)
 
-                    -- Fade out then destroy
+                    -- Fade out then destroy (also respects the cap via the FIFO above)
                     local duration = wapus:GetValue("Backtracking", "Character Duration")
                     task.delay(duration, function()
                         local steps    = 10
                         local fadeStep = (1 - userTransparency) / steps
 
                         for _ = 1, steps do
-                            -- cap at 0.99 so cham lib never skips on the final fade step
                             chamProps.Transparency = math.min(chamProps.Transparency + fadeStep, 0.99)
                             task.wait(0.04)
                         end
@@ -6066,9 +6077,6 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                         if ghost and ghost.Parent then ghost:Destroy() end
                     end)
                 end)
- 
-                backtrackTime = clockTime
-            end
         end
     end));
 
@@ -6661,7 +6669,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     hitboxes:AddDropdown("Material", "SmoothPlastic", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Hit Boxes%%Material"))
 
     backtrack:AddToggle("Enabled", false, getCallback("Backtracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(0.1, 0.1, 1), getCallback("Backtracking%%Character Color"))
-    backtrack:AddSlider("Refresh Rate", 2, 1, 30, 1, " Characters/Second", getCallback("Backtracking%%Refresh Rate"))
+    backtrack:AddSlider("Refresh Rate", 5, 1, 30, 1, " Max Ghosts", getCallback("Backtracking%%Refresh Rate"))
     backtrack:AddSlider("Character Duration", 1, 0.1, 5, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
     backtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Backtracking%%Character Transparency"))
     backtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Backtracking%%Character Material"))
