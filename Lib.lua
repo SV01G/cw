@@ -5972,7 +5972,7 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                             copy.Size         = src.Size
                             copy.CFrame       = src.CFrame
                             copy.Anchored     = true
-                            copy.CanCollide   = true   -- must be true so bullet raycast can hit it
+                            copy.CanCollide   = false   -- must be true so bullet raycast can hit it
                             copy.CastShadow   = false
                             copy.Transparency = 0  -- must be 0; cham lib skips T==1 parts
                             copy.Color        = wapus:GetValue("Backtracking", "Character Color")
