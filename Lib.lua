@@ -6491,7 +6491,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
 
     backtrack:AddToggle("Enabled", false, getCallback("Backtracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(0.1, 0.1, 1), getCallback("Backtracking%%Character Color"))
     backtrack:AddSlider("Refresh Rate", 2, 1, 10, 1, " Characters/Second", getCallback("Backtracking%%Refresh Rate"))
-    backtrack:AddSlider("Character Duration", 10, 0.1, 10, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
+    backtrack:AddSlider("Character Duration", 1, 0.1, 1, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
     backtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Backtracking%%Character Transparency"))
     backtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Backtracking%%Character Material"))
     backtrack:AddToggle("Clone Character", true, getCallback("Backtracking%%Clone Character"))
