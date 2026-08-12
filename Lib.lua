@@ -4571,27 +4571,13 @@ LPH_JIT_MAX(function() -- Main Cheat
 
     -- Watermark: initialize drawing objects once here; RenderStepped only toggles Visible + updates text
     local wmLastClock = 0   -- shared between the do-block and RenderStepped
+    local wmLocalName = game:GetService("Players").LocalPlayer.Name  -- hoisted so callback can also read it
     do
-        local wmLocalName = game:GetService("Players").LocalPlayer.Name
         local wmPad = 8
         local wmAccW = 3
         local wmGap = 3
 
-        -- measure rough text widths using placeholder then fix after first frame
-        wmTitle.Text = defaultUIName
-        wmTitle.Size = 14
-        wmTitle.Color = Color3.fromRGB(225, 235, 255)
-        wmTitle.Outline = true
-        wmTitle.OutlineColor = Color3.new(0, 0, 0)
-        wmTitle.ZIndex = 4
-        wmTitle.Visible = false
-
-        wmUser.Text = wmLocalName
-        wmUser.Size = 13
-        wmUser.Color = Color3.fromRGB(0, 200, 170)
-        wmUser.Outline = true
-        wmUser.OutlineColor = Color3.new(0, 0, 0)
-        wmUser.ZIndex = 4
+        -- wmUser is never shown separately; the combined text string is wmTitle only
         wmUser.Visible = false
 
         local function updateWatermarkLayout()
@@ -4604,7 +4590,6 @@ LPH_JIT_MAX(function() -- Main Cheat
             wmTitle.Color = Color3.fromRGB(220, 225, 235)
             wmTitle.Outline = true
             wmTitle.OutlineColor = Color3.new(0, 0, 0)
-            wmTitle.Visible = true
 
             wmUser.Visible = false
             wmSep.Visible = false
@@ -4615,11 +4600,11 @@ LPH_JIT_MAX(function() -- Main Cheat
                 textW = #text * 6.8
             end
 
-            local padX   = 10   -- horizontal padding each side
-            local h      = 22   -- bar height (gamesense is a bit taller than 20)
-            local accentW = 3   -- left teal strip
+            local padX    = 10   -- horizontal padding each side
+            local h       = 22   -- bar height
+            local accentW = 3    -- left teal strip
             local totalW  = accentW + padX + textW + padX
-            local x, y   = 8, 44  -- moved down 4 px (was 40)
+            local x, y    = 8, 51  -- moved down 7 more px (was 44)
 
             -- thin dark border (1 px each side)
             wmOutline.Filled   = true
@@ -4647,6 +4632,7 @@ LPH_JIT_MAX(function() -- Main Cheat
 
             -- text sits right of the accent strip, vertically centred
             wmTitle.ZIndex   = 5
+            wmTitle.Visible  = true
             wmTitle.Position = Vector2.new(x + accentW + padX, y + math.floor((h - 13) * 0.5) - 1)
         end
 
@@ -4655,12 +4641,16 @@ LPH_JIT_MAX(function() -- Main Cheat
 
         callbackList["Cheat Settings%%Show Watermark"] = function(state)
             local on = state == true
-            wmOutline.Visible = on
-            wmBg.Visible      = on
-            wmAccent.Visible  = on
-            wmSep.Visible     = on
-            wmTitle.Visible   = on
-            wmUser.Visible    = on
+            if on then
+                -- re-run layout so text/position are fresh when toggled on
+                updateWatermarkLayout()
+            else
+                wmOutline.Visible = false
+                wmBg.Visible      = false
+                wmAccent.Visible  = false
+                wmTitle.Visible   = false
+            end
+            -- wmUser and wmSep are never made visible; the combined string in wmTitle covers it
         end
     end
 
@@ -5969,44 +5959,47 @@ callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
                     -- ── Snapshot: build a ghost folder of frozen BaseParts ──
                     -- We don't clone the animated Model (which may be unparented/nil).
                     -- Instead we snapshot directly from the hash, which is always valid.
+                    -- IMPORTANT: parts must NOT start at Transparency=1 — cham lib skips those.
+                    local userTransparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01
                     local ghost = Instance.new("Model")
                     ghost.Name = player.Name
 
                     for partName, src in pairs(charHash) do
                         if typeof(src) == "Instance" and src:IsA("BasePart") then
                             local copy = Instance.new("Part")
-                            copy.Name        = partName
-                            copy.Size        = src.Size
-                            copy.CFrame      = src.CFrame
-                            copy.Anchored    = true
-                            copy.CanCollide  = false
-                            copy.CastShadow  = false
-                            copy.Transparency = 1  -- cham lib will override
+                            copy.Name         = partName
+                            copy.Size         = src.Size
+                            copy.CFrame       = src.CFrame
+                            copy.Anchored     = true
+                            copy.CanCollide   = false
+                            copy.CastShadow   = false
+                            copy.Transparency = 0  -- must be 0; cham lib skips T==1 parts
+                            copy.Color        = wapus:GetValue("Backtracking", "Character Color")
+                            copy.Material     = Enum.Material[wapus:GetValue("Backtracking", "Character Material")]
                             copy.Parent = ghost
                         end
                     end
 
                     ghost.Parent = backtrackObjects
- 
+
                     -- Apply cham properties via the existing cham library
                     local chamProps = {
-                        Material    = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
-                        Transparency = wapus:GetValue("Backtracking", "Character Transparency") * 0.01,
-                        Color       = wapus:GetValue("Backtracking", "Character Color"),
-                        CanCollide  = false,
+                        Material     = Enum.Material[wapus:GetValue("Backtracking", "Character Material")],
+                        Transparency = userTransparency,
+                        Color        = wapus:GetValue("Backtracking", "Character Color"),
                     }
                     local _, uncache = cham.new(ghost, chamProps, false, true, false)
 
                     -- Fade out then destroy
                     local duration = wapus:GetValue("Backtracking", "Character Duration")
                     task.delay(duration, function()
-                        local steps      = 5
-                        local startTrans = chamProps.Transparency
-                        local fadeStep   = (1 - startTrans) / steps
+                        local steps    = 10
+                        local fadeStep = (1 - userTransparency) / steps
 
                         for _ = 1, steps do
-                            chamProps.Transparency = chamProps.Transparency + fadeStep
-                            task.wait(0.05)
+                            -- cap at 0.99 so cham lib never skips on the final fade step
+                            chamProps.Transparency = math.min(chamProps.Transparency + fadeStep, 0.99)
+                            task.wait(0.04)
                         end
 
                         if uncache then uncache() end
