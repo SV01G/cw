@@ -4587,6 +4587,8 @@ LPH_JIT_MAX(function() -- Main Cheat
     callbackList["Aim Assist%%Show FOV Circle"] = aaFovVisible
     callbackList["Aim Assist%%Show FOV"]        = aaFovVisible   -- legacy / keybind path
 
+    callbackList["Aim Assist%%Stickiness"] = function(state) end  -- read live in RenderStepped
+
     callbackList["Aim Assist%%FOV Color"] = function(state)
         aimassistfov.Color = state
     end
@@ -5540,11 +5542,13 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     callbackList["Enemy ESP%%Highlight Chams"] = function(state)
-        if state then buildChams("Highlight") else clearChams() end
+        if not state then clearChams() end
+        -- When enabled, RenderStepped auto-creates the Highlight each frame
     end
 
     callbackList["Enemy ESP%%Adornee Chams"] = function(state)
-        if state then buildChams("SelectionBox") else clearChams() end
+        if not state then clearChams() end
+        -- When enabled, RenderStepped auto-creates SelectionBoxes each frame
     end
 
     callbackList["Enemy ESP%%Chams Visible Color"] = function(state) end
@@ -6127,12 +6131,10 @@ LPH_JIT_MAX(function() -- Main Cheat
         end
 
     if wapus:GetValue("Backtracking", "Enabled") then
-            local maxGhosts  = math.max(1, math.floor(wapus:GetValue("Backtracking", "Max Ghosts")))
-            local duration   = wapus:GetValue("Backtracking", "Character Duration")
-            -- Snapshot interval derived from duration and ghost count so the two sliders
-            -- the user already has fully control behaviour — no separate rate slider needed.
-            -- e.g. duration=2s, maxGhosts=10 → snap every 0.2s → exactly 10 ghosts covering 2s of history
-            local snapshotDelay = duration / maxGhosts
+            local maxGhosts = math.max(1, math.floor(wapus:GetValue("Backtracking", "Max Ghosts")))
+            -- Always snapshot at 20/sec regardless of other settings.
+            -- Max Ghosts caps how many exist at once; Ghost Duration is how long each one fades over.
+            local snapshotDelay = 1 / 20
 
             replicationInterface.operateOnAllEntries(function(player, entry)
                 if not entry._isEnemy then return end
@@ -6464,7 +6466,7 @@ LPH_JIT_MAX(function() -- Main Cheat
         end
         aimTime = aimbotting and aimTime
 
-        -- Aim Assist: screen-space magnetism
+        -- Aim Assist: screen-space magnetism with stickiness zone
         if wapus:GetValue("Aim Assist", "Enabled") and (not wapus:GetValue("Aim Assist", "Only While Aiming") or aiming) then
             local useFov = wapus:GetValue("Aim Assist", "Use FOV")
             local aaRadius = useFov and aimassistfov.Radius or math.huge
@@ -6477,30 +6479,43 @@ LPH_JIT_MAX(function() -- Main Cheat
             )
 
             if aaTarget and aaEntry and not aimbotting then
-                local cameraObj = cameraInterface.getActiveCamera()
-                local aaStrength  = wapus:GetValue("Aim Assist", "Strength") * 0.01
+                local cameraObj    = cameraInterface.getActiveCamera()
+                local aaStrength   = wapus:GetValue("Aim Assist", "Strength") * 0.01
                 local aaSmoothness = wapus:GetValue("Aim Assist", "Smoothness")
+                local aaSticky     = wapus:GetValue("Aim Assist", "Stickiness") * 0.01
 
-                -- convert target world pos to screen, get direction toward it from screen center
-                local screenPos = camera:WorldToViewportPoint(aaTarget)
-                local center = camera.ViewportSize * 0.5
+                local screenPos   = camera:WorldToViewportPoint(aaTarget)
+                local center      = camera.ViewportSize * 0.5
                 local screenDelta = Vector2.new(screenPos.X, screenPos.Y) - center
 
                 if screenPos.Z > 0 and screenDelta.Magnitude > 0 then
-                    -- convert screen delta to angle delta — small nudge only
-                    local fovY = math.rad(camera.FieldOfView)
-                    local fovX = fovY * (camera.ViewportSize.X / camera.ViewportSize.Y)
-                    local angleNudgeX = -(screenDelta.Y / camera.ViewportSize.Y) * fovY * aaStrength
-                    local angleNudgeY = -(screenDelta.X / camera.ViewportSize.X) * fovX * aaStrength
+                    local dist = screenDelta.Magnitude
+
+                    -- Stickiness: within 40px of target, apply extra pull and scale down speed
+                    -- so cursor "sticks" and doesn't slide past the target
+                    local stickyRadius = 40
+                    local stickyScale  = 1
+                    if dist < stickyRadius then
+                        -- Stronger pull when very close, scales from 1x at edge to (1+sticky) at centre
+                        stickyScale = 1 + aaSticky * (1 - dist / stickyRadius)
+                    end
+
+                    local fovY        = math.rad(camera.FieldOfView)
+                    local fovX        = fovY * (camera.ViewportSize.X / camera.ViewportSize.Y)
+                    local angleNudgeX = -(screenDelta.Y / camera.ViewportSize.Y) * fovY * aaStrength * stickyScale
+                    local angleNudgeY = -(screenDelta.X / camera.ViewportSize.X) * fovX * aaStrength * stickyScale
 
                     local current = cameraObj._angles
-                    local nudged = Vector3.new(
+                    local nudged  = Vector3.new(
                         math.clamp(current.X + angleNudgeX, cameraObj._minAngle or -math.pi*0.5, cameraObj._maxAngle or math.pi*0.5),
                         current.Y + angleNudgeY,
                         0
                     )
-                    local smoothed = current:lerp(nudged, 1 - aaSmoothness)
-                    cameraObj._delta = (smoothed - current) / deltaTime
+                    -- Smoothness: lerp between current and nudged
+                    -- Lower aaSmoothness = snappier, higher = more gradual
+                    local lerpT   = math.clamp(1 - aaSmoothness + deltaTime * 8, 0.05, 1)
+                    local smoothed = current:lerp(nudged, lerpT)
+                    cameraObj._delta  = (smoothed - current) / deltaTime
                     cameraObj._angles = smoothed
                 end
             end
@@ -6880,6 +6895,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     aimassist:AddDropdown("Target Part", "Head", {"Head", "Torso"}, getCallback("Aim Assist%%Target Part"))
     aimassist:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
     aimassist:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
+    aimassist:AddSlider("Stickiness", 50, 0, 100, 1, "%", getCallback("Aim Assist%%Stickiness"))
     aimassist:AddToggle("Use FOV", false, getCallback("Aim Assist%%Use FOV"))
     aimassist:AddSlider("FOV Radius", 200, 2, 800, 1, "px", getCallback("Aim Assist%%FOV Radius"))
     aimassist:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV Circle")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
@@ -6904,7 +6920,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
 
     backtrack:AddToggle("Enabled", false, getCallback("Backtracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(0.1, 0.1, 1), getCallback("Backtracking%%Character Color"))
     backtrack:AddSlider("Max Ghosts", 5, 1, 30, 1, " Ghosts", getCallback("Backtracking%%Max Ghosts"))
-    backtrack:AddSlider("Ghost Duration", 2, 0.1, 10, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
+    backtrack:AddSlider("Ghost Duration", 2, 0.1, 30, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
     backtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Backtracking%%Character Transparency"))
     backtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Backtracking%%Character Material"))
     backtrack:AddToggle("Clone Character", true, getCallback("Backtracking%%Clone Character"))
