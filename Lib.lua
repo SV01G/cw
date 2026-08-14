@@ -5298,10 +5298,8 @@ LPH_JIT_MAX(function() -- Main Cheat
         end
     end
 
-    local function buildChams()
+    local function buildChams(method)
         clearChams()
-        if not wapus:GetValue("Enemy ESP%%Highlight Chams") then return end
-        local method   = wapus:GetValue("Enemy ESP%%Chams Method") or "SelectionBox"
         local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color") or Color3.fromRGB(255, 80, 80)
         local transp   = (wapus:GetValue("Enemy ESP%%Chams Transparency") or 50) * 0.01
 
@@ -5316,12 +5314,12 @@ LPH_JIT_MAX(function() -- Main Cheat
                 for _, part in ipairs(char:GetDescendants()) do
                     if part:IsA("BasePart") then
                         local b = Instance.new("SelectionBox")
-                        b.Adornee             = part
-                        b.Color3              = visColor
-                        b.LineThickness        = 0.05
-                        b.SurfaceTransparency  = 1
-                        b.SurfaceColor3        = visColor
-                        b.Parent               = char
+                        b.Adornee            = part
+                        b.Color3             = visColor
+                        b.LineThickness       = 0.05
+                        b.SurfaceTransparency = 1
+                        b.SurfaceColor3       = visColor
+                        b.Parent              = char
                         table.insert(boxes, b)
                     end
                 end
@@ -5336,26 +5334,17 @@ LPH_JIT_MAX(function() -- Main Cheat
                 h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
                 h.Parent              = char
                 chamHighlights[player] = h
-            elseif method == "Chams" then
-                local props, uncacheFn = cham.new(char, {
-                    Material     = Enum.Material.ForceField,
-                    Color        = visColor,
-                    Transparency = transp,
-                }, false, true, false)
-                if props then
-                    chamChamProps[player] = props
-                    chamUncache[player]   = uncacheFn
-                end
             end
         end)
     end
 
-    -- RenderStepped: raycast → switch visible/occluded color, auto-rebuild on respawn
+    -- RenderStepped: raycast → switch visible/occluded color on whichever mode is active
     table.insert(connectionList, game:GetService("RunService").RenderStepped:Connect(function()
-        if not wapus:GetValue("Enemy ESP%%Highlight Chams") then return end
-        chamRayParams.FilterDescendantsInstances = physicsignore
+        local highlightOn = wapus:GetValue("Enemy ESP%%Highlight Chams")
+        local adorneeOn   = wapus:GetValue("Enemy ESP%%Adornee Chams")
+        if not highlightOn and not adorneeOn then return end
 
-        local method   = wapus:GetValue("Enemy ESP%%Chams Method")        or "SelectionBox"
+        chamRayParams.FilterDescendantsInstances = physicsignore
         local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color")  or Color3.fromRGB(255, 80, 80)
         local occColor = wapus:GetValue("Enemy ESP%%Chams Occluded Color") or Color3.fromRGB(80, 80, 255)
         local transp   = (wapus:GetValue("Enemy ESP%%Chams Transparency")  or 50) * 0.01
@@ -5377,7 +5366,23 @@ LPH_JIT_MAX(function() -- Main Cheat
             end
             local activeColor = isVisible and visColor or occColor
 
-            if method == "SelectionBox" then
+            if highlightOn then
+                local h = chamHighlights[player]
+                if not h or not h.Parent or h.Adornee ~= char then
+                    if h then pcall(function() h:Destroy() end) end
+                    h = Instance.new("Highlight")
+                    h.Adornee   = char
+                    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    h.Parent    = char
+                    chamHighlights[player] = h
+                end
+                h.FillColor           = activeColor
+                h.FillTransparency    = transp
+                h.OutlineColor        = activeColor
+                h.OutlineTransparency = 0
+            end
+
+            if adorneeOn then
                 local boxes = chamBoxes[player]
                 if not boxes or #boxes == 0 or not boxes[1] or not boxes[1].Parent then
                     if boxes then for _, b in ipairs(boxes) do pcall(function() b:Destroy() end) end end
@@ -5397,38 +5402,6 @@ LPH_JIT_MAX(function() -- Main Cheat
                 for _, b in ipairs(boxes) do
                     b.Color3        = activeColor
                     b.SurfaceColor3 = activeColor
-                end
-
-            elseif method == "Highlight" then
-                local h = chamHighlights[player]
-                if not h or not h.Parent or h.Adornee ~= char then
-                    if h then pcall(function() h:Destroy() end) end
-                    h = Instance.new("Highlight")
-                    h.Adornee   = char
-                    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                    h.Parent    = char
-                    chamHighlights[player] = h
-                end
-                h.FillColor           = activeColor
-                h.FillTransparency    = transp
-                h.OutlineColor        = activeColor
-                h.OutlineTransparency = 0
-
-            elseif method == "Chams" then
-                local props = chamChamProps[player]
-                if not props then
-                    local newProps, newUncache = cham.new(char, {
-                        Material     = Enum.Material.ForceField,
-                        Color        = activeColor,
-                        Transparency = transp,
-                    }, false, true, false)
-                    chamChamProps[player] = newProps
-                    chamUncache[player]   = newUncache
-                    props = newProps
-                end
-                if props then
-                    props.Color        = activeColor
-                    props.Transparency = transp
                 end
             end
         end)
@@ -5567,27 +5540,26 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     callbackList["Enemy ESP%%Highlight Chams"] = function(state)
-        if state then rebuildEnemyChams() else destroyEnemyChams() end
+        if state then buildChams("Highlight") else clearChams() end
     end
 
-    callbackList["Enemy ESP%%Chams Method"] = function(state)
-        rebuildEnemyChams()
+    callbackList["Enemy ESP%%Adornee Chams"] = function(state)
+        if state then buildChams("SelectionBox") else clearChams() end
     end
 
     callbackList["Enemy ESP%%Chams Visible Color"] = function(state) end
     callbackList["Enemy ESP%%Chams Occluded Color"] = function(state) end
 
-    callbackList["Enemy ESP%%Chams Transparency"] = function(state)
-        -- live-updated in RenderStepped
-    end
+    callbackList["Enemy ESP%%Chams Transparency"] = function(state) end
 
-    -- compat stubs for any saved configs that still reference old keys
+    -- compat stubs
+    callbackList["Enemy ESP%%Chams Method"]              = function() end
     callbackList["Enemy ESP%%Highlight Outline Color"]   = function() end
     callbackList["Enemy ESP%%Highlight Outline Opacity"] = function() end
     callbackList["Enemy ESP%%Highlight Fill Color"]      = function() end
     callbackList["Enemy ESP%%Highlight Fill Opacity"]    = function() end
     callbackList["Enemy ESP%%Highlight Visible Check"]   = function() end
-    callbackList["Enemy ESP%%Rebuild Chams"]             = rebuildEnemyChams
+    callbackList["Enemy ESP%%Rebuild Chams"]             = function() end
 
 
 
@@ -7018,7 +6990,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     --enemyesp:AddSlider("Text Size", 20, 5, 40, 1, " px", getCallback("Enemy ESP%%Text Size"))
     enemyesp:AddToggle("Text Outlines", true, getCallback("Enemy ESP%%Text Outlines")):AddColorPicker("Text Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Text Outline Color"))
     enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Visible Color", Color3.fromRGB(255, 80, 80), getCallback("Enemy ESP%%Chams Visible Color")):AddColorPicker("Occluded Color", Color3.fromRGB(80, 80, 255), getCallback("Enemy ESP%%Chams Occluded Color"))
-    enemyesp:AddDropdown("Chams Method", "SelectionBox", {"SelectionBox", "Highlight", "Chams"}, getCallback("Enemy ESP%%Chams Method"))
+    enemyesp:AddToggle("Adornee Chams", false, getCallback("Enemy ESP%%Adornee Chams"))
     enemyesp:AddSlider("Chams Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Chams Transparency"))
 
     teamesp:AddToggle("Enabled", true, getCallback("Team ESP%%Enabled")):AddKeyBind(nil, "Key Bind")
