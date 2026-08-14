@@ -5268,83 +5268,38 @@ LPH_JIT_MAX(function() -- Main Cheat
 
     espInterface.Load()
 
-    -- ── Enemy Chams ────────────────────────────────────────────────────────────
-    -- Three methods via dropdown:
-    --   SelectionBox  — infinite-yields style: SelectionBox per part, Adornee=part.
-    --                   Renders through walls. SurfaceTransparency=1 = outline only.
-    --   Highlight     — Roblox native Highlight, Adornee=character model, AlwaysOnTop.
-    --   Chams         — cham.new ForceField material override on character parts.
-    -- All three do a visibility raycast and switch color (visible vs occluded).
+    -- ── Enemy Chams ──────────────────────────────────────────────────────────
+    -- Highlight: Roblox Highlight on character model, AlwaysOnTop, color switches
+    --            on visibility raycast (vis=one color, occluded=another).
+    -- Adornee:   BoxHandleAdornment per body part, AlwaysOnTop=true — exact same
+    --            style as the original commented-out box chams in this script.
+    --            Shows body part hitboxes through walls, color switches on vis.
 
-    local chamBoxes      = {}  -- [player] = {SelectionBox, ...}
-    local chamHighlights = {}  -- [player] = Highlight
-    local chamChamProps  = {}  -- [player] = cham.new props
-    local chamUncache    = {}  -- [player] = cham.new uncache fn
+    local chamHighlights  = {}  -- [player] = Highlight instance
+    local chamAdornments  = {}  -- [player] = { BoxHandleAdornment, ... }
 
     local chamRayParams = RaycastParams.new()
     chamRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
     local function clearChams()
-        for player, boxes in pairs(chamBoxes) do
-            for _, b in ipairs(boxes) do pcall(function() b:Destroy() end) end
-            chamBoxes[player] = nil
-        end
         for player, h in pairs(chamHighlights) do
             pcall(function() h:Destroy() end)
             chamHighlights[player] = nil
         end
-        for player, u in pairs(chamUncache) do
-            pcall(u)
-            chamChamProps[player] = nil
-            chamUncache[player]   = nil
+        for player, adornList in pairs(chamAdornments) do
+            for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
+            chamAdornments[player] = nil
         end
     end
 
-    local function buildChams(method)
-        clearChams()
-        local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color") or Color3.fromRGB(255, 80, 80)
-        local transp   = (wapus:GetValue("Enemy ESP%%Chams Transparency") or 50) * 0.01
-
-        replicationInterface.operateOnAllEntries(function(player, entry)
-            if not entry._isEnemy then return end
-            local thirdPerson = entry._thirdPersonObject
-            local char = thirdPerson and thirdPerson:getCharacterModel()
-            if not char then return end
-
-            if method == "SelectionBox" then
-                local boxes = {}
-                for _, part in ipairs(char:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        local b = Instance.new("SelectionBox")
-                        b.Adornee            = part
-                        b.Color3             = visColor
-                        b.LineThickness       = 0.05
-                        b.SurfaceTransparency = 1
-                        b.SurfaceColor3       = visColor
-                        b.Parent              = char
-                        table.insert(boxes, b)
-                    end
-                end
-                chamBoxes[player] = boxes
-            elseif method == "Highlight" then
-                local h = Instance.new("Highlight")
-                h.Adornee             = char
-                h.FillColor           = visColor
-                h.FillTransparency    = transp
-                h.OutlineColor        = visColor
-                h.OutlineTransparency = 0
-                h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
-                h.Parent              = char
-                chamHighlights[player] = h
-            end
-        end)
-    end
-
-    -- RenderStepped: raycast → switch visible/occluded color on whichever mode is active
+    -- RenderStepped: create/update both modes each frame
     table.insert(connectionList, game:GetService("RunService").RenderStepped:Connect(function()
         local highlightOn = wapus:GetValue("Enemy ESP%%Highlight Chams")
         local adorneeOn   = wapus:GetValue("Enemy ESP%%Adornee Chams")
-        if not highlightOn and not adorneeOn then return end
+        if not highlightOn and not adorneeOn then
+            clearChams()
+            return
+        end
 
         chamRayParams.FilterDescendantsInstances = physicsignore
         local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color")  or Color3.fromRGB(255, 80, 80)
@@ -5355,56 +5310,82 @@ LPH_JIT_MAX(function() -- Main Cheat
         replicationInterface.operateOnAllEntries(function(player, entry)
             if not entry._isEnemy then return end
             local thirdPerson = entry._thirdPersonObject
-            local char        = thirdPerson and thirdPerson:getCharacterModel()
-            if not char then return end
+            if not thirdPerson then return end
 
-            -- Visibility raycast
-            local rootPart  = thirdPerson and thirdPerson:getRootPart()
+            -- Use _characterModelHash directly — always populated, never nil
+            local charHash = thirdPerson._characterModelHash
+            if not charHash then return end
+
+            -- Visibility raycast from camera to root part
+            local rootPart  = thirdPerson._rootPart
             local isVisible = true
             if rootPart then
                 local dir    = rootPart.Position - camPos
                 local result = workspace:Raycast(camPos, dir, chamRayParams)
-                isVisible    = (not result) or (result.Instance and result.Instance:IsDescendantOf(char))
+                isVisible    = (not result) or
+                               (result.Instance and result.Instance:IsDescendantOf(rootPart.Parent or rootPart))
             end
             local activeColor = isVisible and visColor or occColor
 
+            -- ── Highlight mode ───────────────────────────────────────────────
             if highlightOn then
-                local h = chamHighlights[player]
-                if not h or not h.Parent or h.Adornee ~= char then
-                    if h then pcall(function() h:Destroy() end) end
-                    h = Instance.new("Highlight")
-                    h.Adornee   = char
-                    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                    h.Parent    = char
-                    chamHighlights[player] = h
+                -- Highlight needs the Model, not individual parts
+                local char = thirdPerson:getCharacterModel()
+                if char then
+                    local h = chamHighlights[player]
+                    if not h or not h.Parent or h.Adornee ~= char then
+                        if h then pcall(function() h:Destroy() end) end
+                        h = Instance.new("Highlight")
+                        h.Adornee   = char
+                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        h.Parent    = char
+                        chamHighlights[player] = h
+                    end
+                    h.FillColor           = activeColor
+                    h.FillTransparency    = transp
+                    h.OutlineColor        = activeColor
+                    h.OutlineTransparency = 0
                 end
-                h.FillColor           = activeColor
-                h.FillTransparency    = transp
-                h.OutlineColor        = activeColor
-                h.OutlineTransparency = 0
+            elseif chamHighlights[player] then
+                pcall(function() chamHighlights[player]:Destroy() end)
+                chamHighlights[player] = nil
             end
 
+            -- ── Adornee (BoxHandleAdornment) mode ────────────────────────────
             if adorneeOn then
-                local boxes = chamBoxes[player]
-                if not boxes or #boxes == 0 or not boxes[1] or not boxes[1].Parent then
-                    if boxes then for _, b in ipairs(boxes) do pcall(function() b:Destroy() end) end end
-                    boxes = {}
-                    for _, part in ipairs(char:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            local b = Instance.new("SelectionBox")
-                            b.Adornee             = part
-                            b.LineThickness        = 0.05
-                            b.SurfaceTransparency  = 1
-                            b.Parent               = char
-                            table.insert(boxes, b)
+                local adornList = chamAdornments[player]
+
+                -- Rebuild if missing or first part was destroyed
+                if not adornList or #adornList == 0 or not adornList[1] or not adornList[1].Parent then
+                    if adornList then
+                        for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
+                    end
+                    adornList = {}
+                    for partName, part in pairs(charHash) do
+                        if typeof(part) == "Instance" and part:IsA("BasePart") then
+                            local hitboxSize = desktopHitBox[partName] and desktopHitBox[partName].size or part.Size
+                            local a = Instance.new("BoxHandleAdornment")
+                            a.Adornee     = part
+                            a.Size        = hitboxSize
+                            a.Color3      = activeColor
+                            a.Transparency = transp
+                            a.AlwaysOnTop = true
+                            a.ZIndex      = 0
+                            a.Parent      = part
+                            table.insert(adornList, a)
                         end
                     end
-                    chamBoxes[player] = boxes
+                    chamAdornments[player] = adornList
                 end
-                for _, b in ipairs(boxes) do
-                    b.Color3        = activeColor
-                    b.SurfaceColor3 = activeColor
+
+                -- Update color/transparency every frame
+                for _, a in ipairs(adornList) do
+                    a.Color3      = activeColor
+                    a.Transparency = transp
                 end
+            elseif chamAdornments[player] then
+                for _, a in ipairs(chamAdornments[player]) do pcall(function() a:Destroy() end) end
+                chamAdornments[player] = nil
             end
         end)
     end))
@@ -5542,19 +5523,26 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     callbackList["Enemy ESP%%Highlight Chams"] = function(state)
-        if not state then clearChams() end
-        -- When enabled, RenderStepped auto-creates the Highlight each frame
+        if not state then
+            for player, h in pairs(chamHighlights) do
+                pcall(function() h:Destroy() end)
+                chamHighlights[player] = nil
+            end
+        end
     end
 
     callbackList["Enemy ESP%%Adornee Chams"] = function(state)
-        if not state then clearChams() end
-        -- When enabled, RenderStepped auto-creates SelectionBoxes each frame
+        if not state then
+            for player, adornList in pairs(chamAdornments) do
+                for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
+                chamAdornments[player] = nil
+            end
+        end
     end
 
     callbackList["Enemy ESP%%Chams Visible Color"] = function(state) end
     callbackList["Enemy ESP%%Chams Occluded Color"] = function(state) end
-
-    callbackList["Enemy ESP%%Chams Transparency"] = function(state) end
+    callbackList["Enemy ESP%%Chams Transparency"]   = function(state) end
 
     -- compat stubs
     callbackList["Enemy ESP%%Chams Method"]              = function() end
@@ -6212,18 +6200,11 @@ LPH_JIT_MAX(function() -- Main Cheat
                 }
                 local _, uncache = cham.new(ghost, chamProps, false, true, false)
 
-                -- Smooth fade then destroy
-                local duration = wapus:GetValue("Backtracking", "Character Duration")
-                task.delay(duration, function()
-                    local steps    = 12
-                    local fadeStep = (1 - userTransparency) / steps
-                    for _ = 1, steps do
-                        chamProps.Transparency = math.min(chamProps.Transparency + fadeStep, 0.99)
-                        task.wait(0.04)
-                    end
+                -- Destroy after the user-set time (no fade — just snaps away)
+                local timeMs = wapus:GetValue("Backtracking", "Time") or 500
+                task.delay(timeMs * 0.001, function()
                     if uncache then uncache() end
                     if ghost and ghost.Parent then ghost:Destroy() end
-                    -- Remove from queue
                     local q = backtrackQueues[player]
                     if q then
                         for i, g in ipairs(q) do
@@ -6920,7 +6901,7 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
 
     backtrack:AddToggle("Enabled", false, getCallback("Backtracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(0.1, 0.1, 1), getCallback("Backtracking%%Character Color"))
     backtrack:AddSlider("Max Ghosts", 5, 1, 30, 1, " Ghosts", getCallback("Backtracking%%Max Ghosts"))
-    backtrack:AddSlider("Ghost Duration", 2, 0.1, 30, 0.1, " Seconds", getCallback("Backtracking%%Character Duration"))
+    backtrack:AddSlider("Time", 500, 100, 2000, 50, "ms", getCallback("Backtracking%%Time"))
     backtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Backtracking%%Character Transparency"))
     backtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Backtracking%%Character Material"))
     backtrack:AddToggle("Clone Character", true, getCallback("Backtracking%%Clone Character"))
