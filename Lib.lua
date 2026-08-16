@@ -3966,12 +3966,32 @@ LPH_JIT_MAX(function() -- Main Cheat
     end
 
     local applyImpulse = recoil.applyImpulse
-    function recoil.applyImpulse(...)
+    function recoil.applyImpulse(self, impulse, ...)
         if aimbotting or wapus:GetValue("Gun Mods", "No Recoil") then
             return
         end
 
-        return applyImpulse(...)
+        -- Recoil Control System: counter-apply the impulse to the camera angles
+        local rcsStrength = wapus:GetValue("Aim Assist", "RCS Strength")
+        if rcsStrength and rcsStrength > 0 and wapus:GetValue("Aim Assist", "Recoil Control") then
+            local cameraObj = cameraInterface.getActiveCamera()
+            if cameraObj and impulse then
+                local scale   = rcsStrength * 0.01
+                local current = cameraObj._angles
+                -- Impulse is in camera-space: X = pitch (up), Y = yaw
+                -- Counter it by subtracting the vertical component
+                local corrected = Vector3.new(
+                    math.clamp(current.X - impulse.X * scale,
+                        cameraObj._minAngle or -math.pi * 0.5,
+                        cameraObj._maxAngle or  math.pi * 0.5),
+                    current.Y - impulse.Y * scale,
+                    0
+                )
+                cameraObj._angles = corrected
+            end
+        end
+
+        return applyImpulse(self, impulse, ...)
     end
 
     local reload = firearmObject.reload
@@ -4587,7 +4607,9 @@ LPH_JIT_MAX(function() -- Main Cheat
     callbackList["Aim Assist%%Show FOV Circle"] = aaFovVisible
     callbackList["Aim Assist%%Show FOV"]        = aaFovVisible   -- legacy / keybind path
 
-    callbackList["Aim Assist%%Stickiness"] = function(state) end  -- read live in RenderStepped
+    callbackList["Aim Assist%%Stickiness"]     = function(state) end
+    callbackList["Aim Assist%%Recoil Control"] = function(state) end
+    callbackList["Aim Assist%%RCS Strength"]   = function(state) end
 
     callbackList["Aim Assist%%FOV Color"] = function(state)
         aimassistfov.Color = state
@@ -5300,17 +5322,17 @@ LPH_JIT_MAX(function() -- Main Cheat
                     for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
                 end
                 adornList = {}
-                for partName, part in pairs(charHash) do
+                for partName, part in thirdPerson._characterModelHash do
                     if typeof(part) == "Instance" and part:IsA("BasePart") then
                         local sz = desktopHitBox[partName] and desktopHitBox[partName].size or part.Size
                         local a = Instance.new("BoxHandleAdornment")
-                        a.Adornee     = part
-                        a.Size        = sz
-                        a.Color3      = color
+                        a.Adornee      = part
+                        a.Size         = sz
+                        a.Color3       = color
                         a.Transparency = transp
-                        a.AlwaysOnTop = true
-                        a.ZIndex      = 0
-                        a.Parent      = part
+                        a.AlwaysOnTop  = true
+                        a.ZIndex       = 0
+                        a.Parent       = part
                         table.insert(adornList, a)
                     end
                 end
@@ -6100,7 +6122,7 @@ LPH_JIT_MAX(function() -- Main Cheat
                 if not charHash then return end
 
                 local hasBase = false
-                for _, part in pairs(charHash) do
+                for _, part in charHash do
                     if typeof(part) == "Instance" and part:IsA("BasePart") then
                         hasBase = true; break
                     end
@@ -6121,7 +6143,7 @@ LPH_JIT_MAX(function() -- Main Cheat
                 local ghost = Instance.new("Model")
                 ghost.Name = player.Name
 
-                for partName, src in pairs(charHash) do
+                for partName, src in charHash do
                     if typeof(src) == "Instance" and src:IsA("BasePart") then
                         local copy = Instance.new("Part")
                         copy.Name         = partName
@@ -6270,7 +6292,7 @@ LPH_JIT_MAX(function() -- Main Cheat
                 end
 
                 local partNames = {}
-                for partName, src in pairs(charHash) do
+                for partName, src in charHash do
                     if typeof(src) == "Instance" and src:IsA("BasePart") then
                         partNames[partName] = true
                         local predicted = src.CFrame + vel * thisPred
@@ -6784,6 +6806,8 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     aimassist:AddSlider("Strength", 30, 1, 100, 1, "%", getCallback("Aim Assist%%Strength"))
     aimassist:AddSlider("Smoothness", 0.85, 0.01, 0.99, 0.01, "x", getCallback("Aim Assist%%Smoothness"))
     aimassist:AddSlider("Stickiness", 50, 0, 100, 1, "%", getCallback("Aim Assist%%Stickiness"))
+    aimassist:AddToggle("Recoil Control", false, getCallback("Aim Assist%%Recoil Control"))
+    aimassist:AddSlider("RCS Strength", 80, 1, 100, 1, "%", getCallback("Aim Assist%%RCS Strength"))
     aimassist:AddToggle("Use FOV", false, getCallback("Aim Assist%%Use FOV"))
     aimassist:AddSlider("FOV Radius", 200, 2, 800, 1, "px", getCallback("Aim Assist%%FOV Radius"))
     aimassist:AddToggle("Show FOV Circle", false, getCallback("Aim Assist%%Show FOV Circle")):AddKeyBind(nil, "AA FOV Key Bind"):AddColorPicker("FOV Circle Color", Color3.new(1, 1, 1), getCallback("Aim Assist%%FOV Color"))
