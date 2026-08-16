@@ -5268,58 +5268,124 @@ LPH_JIT_MAX(function() -- Main Cheat
 
     espInterface.Load()
 
-    -- ── Adornee Chams (BoxHandleAdornment per body part) ──────────────────────
-    -- BoxHandleAdornment on each part of _characterModelHash, AlwaysOnTop=true.
-    -- Highlight Chams is handled by espInterface.teamSettings.enemy.chams below.
-    local chamAdornments = {}  -- [player] = { BoxHandleAdornment, ... }
+    -- ── Enemy Chams ──────────────────────────────────────────────────────────
+    -- Highlight: Roblox Highlight on character model, AlwaysOnTop, color switches
+    --            on visibility raycast (vis=one color, occluded=another).
+    -- Adornee:   BoxHandleAdornment per body part, AlwaysOnTop=true — exact same
+    --            style as the original commented-out box chams in this script.
+    --            Shows body part hitboxes through walls, color switches on vis.
 
+    local chamHighlights  = {}  -- [player] = Highlight instance
+    local chamAdornments  = {}  -- [player] = { BoxHandleAdornment, ... }
+
+    local chamRayParams = RaycastParams.new()
+    chamRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local function clearChams()
+        for player, h in pairs(chamHighlights) do
+            pcall(function() h:Destroy() end)
+            chamHighlights[player] = nil
+        end
+        for player, adornList in pairs(chamAdornments) do
+            for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
+            chamAdornments[player] = nil
+        end
+    end
+
+    -- RenderStepped: create/update both modes each frame
     table.insert(connectionList, game:GetService("RunService").RenderStepped:Connect(function()
-        if not wapus:GetValue("Enemy ESP%%Adornee Chams") then
-            for player, adornList in pairs(chamAdornments) do
-                for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
-                chamAdornments[player] = nil
-            end
+        local highlightOn = wapus:GetValue("Enemy ESP%%Highlight Chams")
+        local adorneeOn   = wapus:GetValue("Enemy ESP%%Adornee Chams")
+        if not highlightOn and not adorneeOn then
+            clearChams()
             return
         end
 
-        local color  = wapus:GetValue("Enemy ESP%%Adornee Color")  or Color3.fromRGB(255, 80, 80)
-        local transp = (wapus:GetValue("Enemy ESP%%Adornee Transparency") or 50) * 0.01
+        chamRayParams.FilterDescendantsInstances = physicsignore
+        local visColor = wapus:GetValue("Enemy ESP%%Chams Visible Color")  or Color3.fromRGB(255, 80, 80)
+        local occColor = wapus:GetValue("Enemy ESP%%Chams Occluded Color") or Color3.fromRGB(80, 80, 255)
+        local transp   = (wapus:GetValue("Enemy ESP%%Chams Transparency")  or 50) * 0.01
+        local camPos   = camera.CFrame.Position
 
         replicationInterface.operateOnAllEntries(function(player, entry)
             if not entry._isEnemy then return end
             local thirdPerson = entry._thirdPersonObject
             if not thirdPerson then return end
+
+            -- Use _characterModelHash directly — always populated, never nil
             local charHash = thirdPerson._characterModelHash
             if not charHash then return end
 
-            local adornList = chamAdornments[player]
+            -- Visibility raycast from camera to root part
+            local rootPart  = thirdPerson._rootPart
+            local isVisible = true
+            if rootPart then
+                local dir    = rootPart.Position - camPos
+                local result = workspace:Raycast(camPos, dir, chamRayParams)
+                isVisible    = (not result) or
+                               (result.Instance and result.Instance:IsDescendantOf(rootPart.Parent or rootPart))
+            end
+            local activeColor = isVisible and visColor or occColor
 
-            -- Rebuild if missing or stale
-            if not adornList or #adornList == 0 or not adornList[1] or not adornList[1].Parent then
-                if adornList then
-                    for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
-                end
-                adornList = {}
-                for partName, part in pairs(charHash) do
-                    if typeof(part) == "Instance" and part:IsA("BasePart") then
-                        local sz = desktopHitBox[partName] and desktopHitBox[partName].size or part.Size
-                        local a = Instance.new("BoxHandleAdornment")
-                        a.Adornee     = part
-                        a.Size        = sz
-                        a.Color3      = color
-                        a.Transparency = transp
-                        a.AlwaysOnTop = true
-                        a.ZIndex      = 0
-                        a.Parent      = part
-                        table.insert(adornList, a)
+            -- ── Highlight mode ───────────────────────────────────────────────
+            if highlightOn then
+                -- Highlight needs the Model, not individual parts
+                local char = thirdPerson:getCharacterModel()
+                if char then
+                    local h = chamHighlights[player]
+                    if not h or not h.Parent or h.Adornee ~= char then
+                        if h then pcall(function() h:Destroy() end) end
+                        h = Instance.new("Highlight")
+                        h.Adornee   = char
+                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        h.Parent    = char
+                        chamHighlights[player] = h
                     end
+                    h.FillColor           = activeColor
+                    h.FillTransparency    = transp
+                    h.OutlineColor        = activeColor
+                    h.OutlineTransparency = 0
                 end
-                chamAdornments[player] = adornList
+            elseif chamHighlights[player] then
+                pcall(function() chamHighlights[player]:Destroy() end)
+                chamHighlights[player] = nil
             end
 
-            for _, a in ipairs(adornList) do
-                a.Color3      = color
-                a.Transparency = transp
+            -- ── Adornee (BoxHandleAdornment) mode ────────────────────────────
+            if adorneeOn then
+                local adornList = chamAdornments[player]
+
+                -- Rebuild if missing or first part was destroyed
+                if not adornList or #adornList == 0 or not adornList[1] or not adornList[1].Parent then
+                    if adornList then
+                        for _, a in ipairs(adornList) do pcall(function() a:Destroy() end) end
+                    end
+                    adornList = {}
+                    for partName, part in pairs(charHash) do
+                        if typeof(part) == "Instance" and part:IsA("BasePart") then
+                            local hitboxSize = desktopHitBox[partName] and desktopHitBox[partName].size or part.Size
+                            local a = Instance.new("BoxHandleAdornment")
+                            a.Adornee     = part
+                            a.Size        = hitboxSize
+                            a.Color3      = activeColor
+                            a.Transparency = transp
+                            a.AlwaysOnTop = true
+                            a.ZIndex      = 0
+                            a.Parent      = part
+                            table.insert(adornList, a)
+                        end
+                    end
+                    chamAdornments[player] = adornList
+                end
+
+                -- Update color/transparency every frame
+                for _, a in ipairs(adornList) do
+                    a.Color3      = activeColor
+                    a.Transparency = transp
+                end
+            elseif chamAdornments[player] then
+                for _, a in ipairs(chamAdornments[player]) do pcall(function() a:Destroy() end) end
+                chamAdornments[player] = nil
             end
         end)
     end))
@@ -5456,32 +5522,15 @@ LPH_JIT_MAX(function() -- Main Cheat
         espInterface.teamSettings.enemy.healthTextOutline = state
     end
 
-    -- Highlight Chams: handled entirely by espInterface (original implementation)
     callbackList["Enemy ESP%%Highlight Chams"] = function(state)
-        espInterface.teamSettings.enemy.chams = state
+        if not state then
+            for player, h in pairs(chamHighlights) do
+                pcall(function() h:Destroy() end)
+                chamHighlights[player] = nil
+            end
+        end
     end
 
-    callbackList["Enemy ESP%%Highlight Outline Color"] = function(state)
-        espInterface.teamSettings.enemy.chamsOutlineColor[1] = state
-    end
-
-    callbackList["Enemy ESP%%Highlight Outline Opacity"] = function(state)
-        espInterface.teamSettings.enemy.chamsOutlineColor[2] = state * 0.01
-    end
-
-    callbackList["Enemy ESP%%Highlight Fill Color"] = function(state)
-        espInterface.teamSettings.enemy.chamsFillColor[1] = state
-    end
-
-    callbackList["Enemy ESP%%Highlight Fill Opacity"] = function(state)
-        espInterface.teamSettings.enemy.chamsFillColor[2] = state * 0.01
-    end
-
-    callbackList["Enemy ESP%%Highlight Visible Check"] = function(state)
-        espInterface.teamSettings.enemy.chamsVisibleOnly = state
-    end
-
-    -- Adornee Chams: BoxHandleAdornment RenderStepped loop above handles creation
     callbackList["Enemy ESP%%Adornee Chams"] = function(state)
         if not state then
             for player, adornList in pairs(chamAdornments) do
@@ -5491,14 +5540,17 @@ LPH_JIT_MAX(function() -- Main Cheat
         end
     end
 
-    callbackList["Enemy ESP%%Adornee Color"]        = function(state) end
-    callbackList["Enemy ESP%%Adornee Transparency"] = function(state) end
+    callbackList["Enemy ESP%%Chams Visible Color"] = function(state) end
+    callbackList["Enemy ESP%%Chams Occluded Color"] = function(state) end
+    callbackList["Enemy ESP%%Chams Transparency"]   = function(state) end
 
     -- compat stubs
     callbackList["Enemy ESP%%Chams Method"]              = function() end
-    callbackList["Enemy ESP%%Chams Visible Color"]       = function() end
-    callbackList["Enemy ESP%%Chams Occluded Color"]      = function() end
-    callbackList["Enemy ESP%%Chams Transparency"]        = function() end
+    callbackList["Enemy ESP%%Highlight Outline Color"]   = function() end
+    callbackList["Enemy ESP%%Highlight Outline Opacity"] = function() end
+    callbackList["Enemy ESP%%Highlight Fill Color"]      = function() end
+    callbackList["Enemy ESP%%Highlight Fill Opacity"]    = function() end
+    callbackList["Enemy ESP%%Highlight Visible Check"]   = function() end
     callbackList["Enemy ESP%%Rebuild Chams"]             = function() end
 
 
@@ -6177,17 +6229,15 @@ LPH_JIT_MAX(function() -- Main Cheat
             return
         end
 
-        local now        = os.clock()
-        local totalPred  = wapus:GetValue("Forward Tracking", "Prediction Time")   -- total window in seconds
-        local userTrans  = wapus:GetValue("Forward Tracking", "Character Transparency") * 0.01
-        local matEnum    = Enum.Material[wapus:GetValue("Forward Tracking", "Character Material")]
-        local color      = wapus:GetValue("Forward Tracking", "Character Color")
-        local maxGhosts  = math.max(1, math.floor(wapus:GetValue("Forward Tracking", "Max Ghosts")))
-        -- Max Ghosts=1: one ghost at full Prediction Time (furthest forward)
-        -- Max Ghosts=N: N ghosts each at totalPred/N, totalPred*2/N, ... up to totalPred
-        -- So more ghosts = finer coverage but each one is closer
-        local predStep   = totalPred / maxGhosts
-        local trailDelay = 1 / 20  -- snapshot rate for trail ghosts
+        local now       = os.clock()
+        local predTime  = wapus:GetValue("Forward Tracking", "Prediction Time")
+        local userTrans = wapus:GetValue("Forward Tracking", "Character Transparency") * 0.01
+        local matEnum   = Enum.Material[wapus:GetValue("Forward Tracking", "Character Material")]
+        local color     = wapus:GetValue("Forward Tracking", "Character Color")
+        local maxGhosts = math.max(1, math.floor(wapus:GetValue("Forward Tracking", "Max Ghosts")))
+        -- Trail ghosts snapshot at 8/sec so each one represents a distinct predicted position
+        local trailRate = 8
+        local trailDelay = 1 / trailRate
 
         local seen = {}
 
@@ -6240,61 +6290,108 @@ LPH_JIT_MAX(function() -- Main Cheat
 
             local vel = forwardtrackVel[player] or Vector3.zero
 
-            -- ── Ghosts: each at a different predicted offset ──────────────────
-            -- Ghost i predicts at predStep * i seconds ahead.
-            -- maxGhosts=1: one ghost at totalPred (furthest forward).
-            -- maxGhosts=N: N ghosts at predStep, 2*predStep, ..., N*predStep=totalPred.
+            -- ── Ghost[1] is the primary ghost — updated in-place every frame ──
             forwardtrackGhosts[player] = forwardtrackGhosts[player] or {}
             local ghosts = forwardtrackGhosts[player]
 
-            -- Ensure we have exactly maxGhosts persistent ghost models
-            while #ghosts < maxGhosts do
+            if not ghosts[1] or not ghosts[1].Parent then
                 local g = Instance.new("Model")
                 g.Name = player.Name
                 g.Parent = forwardtrackObjects
                 applyGhostCollisionGroup(g)
-                table.insert(ghosts, g)
-            end
-            while #ghosts > maxGhosts do
-                local extra = table.remove(ghosts)
-                if extra and extra.Parent then extra:Destroy() end
+                ghosts[1] = g
             end
 
-            for i, ghost in ipairs(ghosts) do
-                local thisPred = predStep * i   -- ghost 1 = closest, ghost N = furthest
-
-                -- Recreate model if destroyed
-                if not ghost or not ghost.Parent then
-                    ghost = Instance.new("Model")
-                    ghost.Name = player.Name
-                    ghost.Parent = forwardtrackObjects
-                    applyGhostCollisionGroup(ghost)
-                    ghosts[i] = ghost
+            local primary = ghosts[1]
+            local partNames = {}
+            for partName, src in pairs(charHash) do
+                if typeof(src) == "Instance" and src:IsA("BasePart") then
+                    partNames[partName] = true
+                    local predicted = src.CFrame + vel * predTime
+                    local copy = primary:FindFirstChild(partName)
+                    if not copy then
+                        copy = Instance.new("Part")
+                        copy.Name         = partName
+                        copy.Size         = src.Size
+                        copy.CFrame       = predicted
+                        copy.Anchored     = true
+                        copy.CanCollide   = true
+                        copy.CastShadow   = false
+                        copy.Transparency = userTrans
+                        copy.Color        = color
+                        copy.Material     = matEnum
+                        copy.Parent = primary
+                    else
+                        -- Frame-rate independent lerp: 15 units/sec approach speed
+                        local lerpAlpha = math.min(1, 15 * (now - (forwardtrackLastTime[player] or now)))
+                        copy.CFrame       = copy.CFrame:Lerp(predicted, lerpAlpha)
+                        copy.Transparency = userTrans
+                        copy.Color        = color
+                        copy.Material     = matEnum
+                    end
                 end
+            end
+            for _, child in ipairs(primary:GetChildren()) do
+                if not partNames[child.Name] then child:Destroy() end
+            end
 
-                local partNames = {}
-                for partName, src in pairs(charHash) do
-                    if typeof(src) == "Instance" and src:IsA("BasePart") then
-                        partNames[partName] = true
-                        local predicted = src.CFrame + vel * thisPred
-                        local copy = ghost:FindFirstChild(partName)
-                        if not copy then
-                            copy = Instance.new("Part")
+            -- ── Trail ghosts [2..maxGhosts]: rate-limited snapshots at offset prediction times ──
+            -- Each trail ghost is a frozen snapshot at a slightly further predicted position
+            if maxGhosts > 1 then
+                forwardtrackSnapNext[player] = forwardtrackSnapNext[player] or now
+                if now >= forwardtrackSnapNext[player] then
+                    forwardtrackSnapNext[player] = now + trailDelay
+
+                    -- Evict oldest trail ghost if at cap
+                    while #ghosts >= maxGhosts do
+                        local oldest = table.remove(ghosts, 2)  -- index 1 is primary, never evict it
+                        if oldest and oldest.Parent then oldest:Destroy() end
+                    end
+
+                    -- Snapshot at a slightly larger prediction offset so trail ghosts
+                    -- fan out ahead of the primary ghost
+                    local trailOffset = predTime * 1.5
+                    local snap = Instance.new("Model")
+                    snap.Name = player.Name
+                    for partName, src in pairs(charHash) do
+                        if typeof(src) == "Instance" and src:IsA("BasePart") then
+                            local copy = Instance.new("Part")
                             copy.Name         = partName
                             copy.Size         = src.Size
-                            copy.CFrame       = predicted
+                            copy.CFrame       = src.CFrame + vel * trailOffset
                             copy.Anchored     = true
                             copy.CanCollide   = true
                             copy.CastShadow   = false
-                            copy.Transparency = userTrans
+                            copy.Transparency = math.min(userTrans + 0.15, 0.95)  -- slightly more transparent
                             copy.Color        = color
                             copy.Material     = matEnum
-                            copy.Parent       = ghost
-                        else
-                            copy.CFrame       = copy.CFrame:Lerp(predicted, 0.3)
-                            copy.Transparency = userTrans
-                            copy.Color        = color
-                            copy.Material     = matEnum
+                            copy.Parent = snap
+                        end
+                    end
+                    snap.Parent = forwardtrackObjects
+                    applyGhostCollisionGroup(snap)
+                    table.insert(ghosts, snap)  -- appended after index 1
+
+                    -- Trail ghosts fade and self-destruct
+                    task.delay(0.6, function()
+                        local steps = 8
+                        for i = 1, steps do
+                            for _, part in ipairs(snap:GetChildren()) do
+                                if part:IsA("BasePart") then
+                                    part.Transparency = math.min(part.Transparency + (1 / steps), 0.99)
+                                end
+                            end
+                            task.wait(0.04)
+                        end
+                        if snap and snap.Parent then snap:Destroy() end
+                        local q = forwardtrackGhosts[player]
+                        if q then
+                            for i, g in ipairs(q) do
+                                if g == snap then table.remove(q, i); break end
+                            end
+                        end
+                    end)
+                end
             end
 
             seen[player] = true
@@ -6810,8 +6907,8 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     backtrack:AddToggle("Clone Character", true, getCallback("Backtracking%%Clone Character"))
 
     forwardtrack:AddToggle("Enabled", false, getCallback("Forward Tracking%%Enabled")):AddKeyBind(nil, "Key Bind"):AddColorPicker("Character Color", Color3.new(1, 0.5, 0.1), getCallback("Forward Tracking%%Character Color"))
-    forwardtrack:AddSlider("Prediction Time", 2, 0.1, 5, 0.05, "s", getCallback("Forward Tracking%%Prediction Time"))
-    forwardtrack:AddSlider("Max Ghosts", 1, 1, 10, 1, " Ghosts", getCallback("Forward Tracking%%Max Ghosts"))
+    forwardtrack:AddSlider("Max Ghosts", 1, 1, 20, 1, " Ghosts", getCallback("Forward Tracking%%Max Ghosts"))
+    forwardtrack:AddSlider("Prediction Time", 0.15, 0.05, 1, 0.05, " Seconds", getCallback("Forward Tracking%%Prediction Time"))
     forwardtrack:AddSlider("Character Transparency", 50, 0, 100, 1, "%", getCallback("Forward Tracking%%Character Transparency"))
     forwardtrack:AddDropdown("Character Material", "ForceField", {"ForceField", "SmoothPlastic", "Glass"}, getCallback("Forward Tracking%%Character Material"))
 
@@ -6889,12 +6986,9 @@ LPH_NO_VIRTUALIZE(function() -- Make UI
     enemyesp:AddToggle("Health Percents", false, getCallback("Enemy ESP%%Health Percents")):AddColorPicker("Health Number Color", Color3.fromRGB(255,255,255), getCallback("Enemy ESP%%Health Number Color"))
     --enemyesp:AddSlider("Text Size", 20, 5, 40, 1, " px", getCallback("Enemy ESP%%Text Size"))
     enemyesp:AddToggle("Text Outlines", true, getCallback("Enemy ESP%%Text Outlines")):AddColorPicker("Text Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Text Outline Color"))
-    enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Highlight Outline Color", Color3.fromRGB(0,0,0), getCallback("Enemy ESP%%Highlight Outline Color")):AddColorPicker("Highlight Fill Color", Color3.fromRGB(0,0,255), getCallback("Enemy ESP%%Highlight Fill Color"))
-    enemyesp:AddSlider("Highlight Fill Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Fill Opacity"))
-    enemyesp:AddSlider("Highlight Outline Transparency", 0, 0, 100, 1, "%", getCallback("Enemy ESP%%Highlight Outline Opacity"))
-    enemyesp:AddToggle("Highlight Visible Check", false, getCallback("Enemy ESP%%Highlight Visible Check"))
-    enemyesp:AddToggle("Adornee Chams", false, getCallback("Enemy ESP%%Adornee Chams")):AddColorPicker("Adornee Color", Color3.fromRGB(255, 80, 80), getCallback("Enemy ESP%%Adornee Color"))
-    enemyesp:AddSlider("Adornee Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Adornee Transparency"))
+    enemyesp:AddToggle("Highlight Chams", false, getCallback("Enemy ESP%%Highlight Chams")):AddColorPicker("Visible Color", Color3.fromRGB(255, 80, 80), getCallback("Enemy ESP%%Chams Visible Color")):AddColorPicker("Occluded Color", Color3.fromRGB(80, 80, 255), getCallback("Enemy ESP%%Chams Occluded Color"))
+    enemyesp:AddToggle("Adornee Chams", false, getCallback("Enemy ESP%%Adornee Chams"))
+    enemyesp:AddSlider("Chams Transparency", 50, 0, 100, 1, "%", getCallback("Enemy ESP%%Chams Transparency"))
 
     teamesp:AddToggle("Enabled", true, getCallback("Team ESP%%Enabled")):AddKeyBind(nil, "Key Bind")
     teamesp:AddToggle("Boxes", false, getCallback("Team ESP%%Boxes")):AddColorPicker("Box Color", Color3.fromRGB(0,255,255), getCallback("Team ESP%%Box Color"))
